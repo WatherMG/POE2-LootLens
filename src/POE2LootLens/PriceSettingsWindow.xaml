@@ -1,0 +1,131 @@
+<mah:MetroWindow x:ClassModifier="internal"
+        x:Class="Poe2LootLens.PriceSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        FontFamily="{DynamicResource AppFontFamily}"
+        Title="Настройки оценщика"
+        Width="600" Height="590"
+        MinWidth="540" MinHeight="540"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        Icon="app.ico"
+        WindowTitleBrush="#181D26"
+        NonActiveWindowTitleBrush="#181D26"
+        TitleForeground="#C5CEDA"
+        GlowBrush="#303845"
+        TitleCharacterCasing="Normal">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock x:Name="HeaderText" Text="Оценщик комбинаций" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="DescriptionText" Text="Область захвата, поведение неопределённых строк и необязательные хоткеи."
+                           Style="{StaticResource AppMutedText}" Margin="0,4,0,18"/>
+
+                <Border Style="{StaticResource AppCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="RegionSectionText" Text="Область захвата" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="RegionValueText" Text="Не настроена" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                        <TextBlock x:Name="RegionHintText" Text="Область изменяется из главного окна. Во время выбора работающий оценщик приостанавливается."
+                                   Style="{StaticResource AppMutedText}" Margin="0,5,0,0"/>
+                        <TextBlock x:Name="RegionGuideText"
+                                   Text="Выделяйте только строки наград: без рамки книги, полосы прокрутки и фона карты."
+                                   Foreground="#9FC9FF" FontSize="12.5" TextWrapping="Wrap" Margin="0,9,0,8"/>
+                        <Border Background="#0B111A" BorderBrush="#34445F" BorderThickness="1"
+                                CornerRadius="8" Padding="6">
+                            <Image Source="Assets/Guides/price-capture-example.jpg"
+                                   Stretch="Uniform" MaxHeight="260" SnapsToDevicePixels="True"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource AppCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="BehaviorSectionText" Text="Поведение" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="AttemptsLabel" Text="Попыток OCR перед отображением неизвестного результата (2–10)"
+                                   Style="{StaticResource AppLabel}" Margin="0,12,0,5"/>
+                        <TextBox x:Name="AttemptsBox" Width="180" HorizontalAlignment="Left" Style="{StaticResource AppTextBox}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource AppCard}">
+                    <StackPanel>
+                        <TextBlock x:Name="HotkeysSectionText" Text="Хоткеи" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="HotkeysHintText"
+                                   Text="По умолчанию отключены, чтобы не конфликтовать с игрой и другими приложениями."
+                                   Style="{StaticResource AppMutedText}" Margin="0,5,0,12"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="170"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="76"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="StartHotkeyCaption" Grid.Row="0" Text="Запуск / остановка" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="StartHotkeyValue" Grid.Row="0" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindStartButton" Grid.Row="0" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}" Padding="8,5"
+                                    Click="BindStartButton_Click"/>
+                            <Button x:Name="ClearStartButton" Grid.Row="0" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}" Padding="7,5"
+                                    Margin="6,0,0,0" Click="ClearStartButton_Click"/>
+
+                            <TextBlock x:Name="ScanHotkeyCaption" Grid.Row="2" Text="Оценить сейчас" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ScanHotkeyValue" Grid.Row="2" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindScanButton" Grid.Row="2" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}" Padding="8,5"
+                                    Click="BindScanButton_Click"/>
+                            <Button x:Name="ClearScanButton" Grid.Row="2" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}" Padding="7,5"
+                                    Margin="6,0,0,0" Click="ClearScanButton_Click"/>
+
+                            <TextBlock x:Name="CalibrateHotkeyCaption" Grid.Row="4" Text="Выбор области" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="CalibrateHotkeyValue" Grid.Row="4" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindCalibrateButton" Grid.Row="4" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}" Padding="8,5"
+                                    Click="BindCalibrateButton_Click"/>
+                            <Button x:Name="ClearCalibrateButton" Grid.Row="4" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}" Padding="7,5"
+                                    Margin="6,0,0,0" Click="ClearCalibrateButton_Click"/>
+
+                            <TextBlock x:Name="DebugHotkeyCaption" Grid.Row="6" Text="OCR-диагностика" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="DebugHotkeyValue" Grid.Row="6" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindDebugButton" Grid.Row="6" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}" Padding="8,5"
+                                    Click="BindDebugButton_Click"/>
+                            <Button x:Name="ClearDebugButton" Grid.Row="6" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}" Padding="7,5"
+                                    Margin="6,0,0,0" Click="ClearDebugButton_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="ValidationText" Foreground="{StaticResource DangerBrush}" FontSize="12.5"
+                           TextWrapping="Wrap" Margin="2,10,2,0"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="ResetButton" Content="Сбросить настройки оценщика" Style="{StaticResource DangerButton}"
+                    Click="ResetButton_Click"/>
+            <Button x:Name="CancelButton" Grid.Column="2" Content="Отмена" Style="{StaticResource AppButton}"
+                    Click="CancelButton_Click"/>
+            <Button x:Name="SaveButton" Grid.Column="4" Content="Сохранить" Style="{StaticResource PrimaryButton}"
+                    Click="SaveButton_Click"/>
+        </Grid>
+    </Grid>
+</mah:MetroWindow>

@@ -1,0 +1,51 @@
+<mah:MetroWindow x:ClassModifier="internal"
+        x:Class="Poe2LootLens.PriceCaptureGuideWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        FontFamily="{DynamicResource AppFontFamily}"
+        Title="Как выделить область оценщика"
+        Width="610" Height="760"
+        MinWidth="520" MinHeight="620"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        Icon="app.ico"
+        WindowTitleBrush="#181D26"
+        NonActiveWindowTitleBrush="#181D26"
+        TitleForeground="#C5CEDA"
+        GlowBrush="#303845"
+        TitleCharacterCasing="Normal">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock x:Name="HeaderText" Text="Область захвата оценщика" FontSize="22" FontWeight="Bold" Foreground="White"/>
+            <TextBlock x:Name="DescriptionText"
+                       Text="Выделяйте только светлую таблицу со строками наград: без рамки книги, полосы прокрутки и фона Атласа."
+                       Style="{StaticResource AppMutedText}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Style="{StaticResource AppCard}" Padding="12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <Image Source="Assets/Guides/price-capture-example.jpg"
+                           Stretch="Uniform" MaxWidth="520" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="TipsText"
+                               Text="Зелёная рамка должна захватывать строки целиком. Верхняя и нижняя границы могут идти по разделителям строк; не включайте частично видимую следующую строку."
+                               Foreground="#C8D4E4" FontSize="13" TextWrapping="Wrap" Margin="2,14,2,0"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Button Grid.Row="4" x:Name="CloseButton" Content="Закрыть" Style="{StaticResource PrimaryButton}"
+                Width="120" HorizontalAlignment="Right" Click="CloseButton_Click"/>
+    </Grid>
+</mah:MetroWindow>

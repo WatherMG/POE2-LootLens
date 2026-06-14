@@ -1,0 +1,179 @@
+<mah:MetroWindow x:ClassModifier="internal"
+        x:Class="Poe2LootLens.RumorSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        FontFamily="{DynamicResource AppFontFamily}"
+        Title="Настройки сканера слухов"
+        Width="650" Height="720"
+        MinWidth="590" MinHeight="640"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        Icon="app.ico"
+        WindowTitleBrush="#181D26"
+        NonActiveWindowTitleBrush="#181D26"
+        TitleForeground="#C5CEDA"
+        GlowBrush="#303845"
+        TitleCharacterCasing="Normal">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock x:Name="HeaderText" Text="Сканер слухов Атласа" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="DescriptionText" Text="Режим сканирования, поведение оверлея, сортировка и редактор справочника."
+                           Style="{StaticResource AppMutedText}" Margin="0,4,0,18"/>
+
+                <Border Style="{StaticResource AppCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="ModeSectionText" Text="Сканирование" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="ModeLabel" Text="Режим" Style="{StaticResource AppLabel}" Margin="0,12,0,5"/>
+                        <ComboBox x:Name="ModeCombo" Style="{StaticResource AppComboBox}" SelectionChanged="ModeCombo_SelectionChanged">
+                            <ComboBoxItem Tag="manual">Ручной — рекомендуется</ComboBoxItem>
+                            <ComboBoxItem Tag="auto">При наведении — экспериментальный</ComboBoxItem>
+                        </ComboBox>
+                        <TextBlock x:Name="ModeHintText"
+                                   Text="Ручной режим запускается кнопкой или хоткеем и не сканирует интерфейс игры в фоне."
+                                   Style="{StaticResource AppMutedText}" Margin="0,7,0,12"/>
+
+                        <TextBlock x:Name="OcrLanguageLabel" Text="Язык OCR слухов" Style="{StaticResource AppLabel}" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="OcrLanguageCombo" Style="{StaticResource AppComboBox}" Margin="0,0,0,5">
+                            <ComboBoxItem Tag="en">Английский — рекомендуется сейчас</ComboBoxItem>
+                            <ComboBoxItem Tag="ru">Русский</ComboBoxItem>
+                            <ComboBoxItem Tag="en+ru">Английский + русский — медленнее</ComboBoxItem>
+                        </ComboBox>
+                        <TextBlock x:Name="OcrLanguageHintText"
+                                   Text="Эта настройка относится только к слухам и не меняет язык OCR оценщика наград."
+                                   Style="{StaticResource AppMutedText}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+
+                        <Grid x:Name="ManualHotkeyPanel">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="170"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="76"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock x:Name="ToggleHotkeyCaption" Grid.Row="0" Text="Включить / выключить" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ToggleHotkeyValue" Grid.Row="0" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindToggleButton" Grid.Row="0" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}"
+                                    Padding="8,5" Click="BindToggleButton_Click"/>
+                            <Button x:Name="ClearToggleButton" Grid.Row="0" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}"
+                                    Padding="7,5" Margin="6,0,0,0" Click="ClearToggleButton_Click"/>
+
+                            <TextBlock x:Name="ManualHotkeyCaption" Grid.Row="2" Text="Сканировать сейчас" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ManualHotkeyValue" Grid.Row="2" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindManualButton" Grid.Row="2" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}"
+                                    Padding="8,5" Click="BindManualButton_Click"/>
+                            <Button x:Name="ClearManualButton" Grid.Row="2" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}"
+                                    Padding="7,5" Margin="6,0,0,0" Click="ClearManualButton_Click"/>
+
+                            <TextBlock x:Name="DebugHotkeyCaption" Grid.Row="4" Text="Геометрия / отладка" Foreground="#C7D3E3" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="DebugHotkeyValue" Grid.Row="4" Grid.Column="1" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BindDebugButton" Grid.Row="4" Grid.Column="2" Content="Назначить" Style="{StaticResource AppButton}"
+                                    Padding="8,5" Click="BindDebugButton_Click"/>
+                            <Button x:Name="ClearDebugButton" Grid.Row="4" Grid.Column="3" Content="Снять" Style="{StaticResource AppButton}"
+                                    Padding="7,5" Margin="6,0,0,0" Click="ClearDebugButton_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource AppCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="OverlaySectionText" Text="Поведение оверлея" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="HideModeLabel" Text="Автоскрытие" Style="{StaticResource AppLabel}" Margin="0,12,0,5"/>
+                        <ComboBox x:Name="HideModeCombo" Style="{StaticResource AppComboBox}" SelectionChanged="HideModeCombo_SelectionChanged">
+                            <ComboBoxItem Tag="never">Никогда</ComboBoxItem>
+                            <ComboBoxItem Tag="timeout">Через заданное время</ComboBoxItem>
+                        </ComboBox>
+                        <TextBlock x:Name="HideHintText"
+                                   Text="Закреплённый оверлей не скрывается автоматически."
+                                   Style="{StaticResource AppMutedText}" Margin="0,7,0,12"/>
+
+                        <StackPanel x:Name="TimeoutPanel">
+                            <TextBlock x:Name="TimeoutLabel" Text="Таймаут, секунд (1–3600)" Style="{StaticResource AppLabel}"/>
+                            <TextBox x:Name="TimeoutBox" Style="{StaticResource AppTextBox}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource AppCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="SortSectionText" Text="Сортировка карточек" Style="{StaticResource AppSectionTitle}"/>
+                        <TextBlock x:Name="SortModeLabel" Text="Основной критерий" Style="{StaticResource AppLabel}" Margin="0,12,0,5"/>
+                        <ComboBox x:Name="SortModeCombo" Style="{StaticResource AppComboBox}"
+                                  SelectionChanged="SortModeCombo_SelectionChanged">
+                            <ComboBoxItem Tag="tier">Сначала лучший тир</ComboBoxItem>
+                            <ComboBoxItem Tag="kindThenTier">Сначала категория, затем тир</ComboBoxItem>
+                        </ComboBox>
+
+                        <TextBlock x:Name="CategoryOrderLabel" Text="Порядок категорий" Style="{StaticResource AppLabel}" Margin="0,12,0,5"/>
+                        <TextBlock x:Name="CategoryOrderHintText" Style="{StaticResource AppMutedText}"
+                                   Text="Порядок применяется первым только в режиме «Сначала категория, затем тир»."
+                                   Margin="0,0,0,7" TextWrapping="Wrap"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="88"/>
+                            </Grid.ColumnDefinitions>
+                            <ListBox x:Name="CategoryOrderList" Height="112" Background="#0C121C" Foreground="White"
+                                     BorderBrush="#34445F" BorderThickness="1" Padding="5" FontSize="13.5"
+                                     ItemContainerStyle="{StaticResource AppListBoxItem}"/>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <Button x:Name="MoveUpButton" Content="↑ Выше" Style="{StaticResource AppButton}" Padding="7,5" Click="MoveUpButton_Click"/>
+                                <Button x:Name="MoveDownButton" Content="↓ Ниже" Style="{StaticResource AppButton}" Padding="7,5" Margin="0,7,0,0" Click="MoveDownButton_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource AppCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="CatalogSectionText" Text="Описания слухов" Style="{StaticResource AppSectionTitle}"/>
+                            <TextBlock x:Name="CatalogHintText"
+                                       Text="Добавляйте карты, OCR-варианты, тиры, модификаторы и заметки через безопасную форму."
+                                       Style="{StaticResource AppMutedText}" Margin="0,5,14,0"/>
+                        </StackPanel>
+                        <Button x:Name="OpenCatalogEditorButton" Grid.Column="1" Content="Открыть редактор"
+                                Style="{StaticResource AppButton}" VerticalAlignment="Center" Click="OpenCatalogEditorButton_Click"/>
+                    </Grid>
+                </Border>
+
+                <TextBlock x:Name="ValidationText" Foreground="{StaticResource DangerBrush}" FontSize="12.5"
+                           TextWrapping="Wrap" Margin="2,10,2,0"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="ResetButton" Content="Сбросить настройки сканера" Style="{StaticResource DangerButton}"
+                    Click="ResetButton_Click"/>
+            <Button x:Name="CancelButton" Grid.Column="2" Content="Отмена" Style="{StaticResource AppButton}"
+                    Click="CancelButton_Click"/>
+            <Button x:Name="SaveButton" Grid.Column="4" Content="Сохранить" Style="{StaticResource PrimaryButton}"
+                    Click="SaveButton_Click"/>
+        </Grid>
+    </Grid>
+</mah:MetroWindow>

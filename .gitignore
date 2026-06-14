@@ -1,0 +1,57 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+/publish/
+/release/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Runtime + diagnostic artifacts (generated, not source)
+config.json
+logs/
+ocr_test.txt
+price_snapshot.json
+debug_ocr.png
+rumor_catalog.user.json
+rumor_catalog.user.json.bak
+rumor_catalog.user.json.tmp
+rumor_catalog.json
+
+# Loose screenshots / fixtures used only for local docs & testing
+Screenshot_*.png
+list_1.png
+sample.png
+sample 1.png
+*.jpg
+*.jpeg
+
+
+# Local development tooling and notes
+.claude/
+CLAUDE.md
+CHANGES*.md
+VALIDATION*.md
+IMPLEMENTATION*.md
+
+# Release output
+/artifacts/
+
+# POE2 LootLens runtime data
+/logs/
+/cache/
+/icons/
+
+# User-managed files
+/custom_prices.json
+/rumor_catalog.user.json
+
+# Local and temporary files
+*.log
+*.tmp
+*.bak
+*.local.json

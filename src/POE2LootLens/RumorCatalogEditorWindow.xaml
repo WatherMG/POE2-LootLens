@@ -1,0 +1,335 @@
+<mah:MetroWindow x:ClassModifier="internal"
+        x:Class="Poe2LootLens.RumorCatalogEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        FontFamily="{DynamicResource AppFontFamily}"
+        Title="Редактор описаний слухов"
+        Width="1120" Height="790"
+        MinWidth="940" MinHeight="680"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        Icon="app.ico"
+        WindowTitleBrush="#181D26"
+        NonActiveWindowTitleBrush="#181D26"
+        TitleForeground="#C5CEDA"
+        GlowBrush="#303845"
+        TitleCharacterCasing="Normal">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock x:Name="HeaderText" Text="Редактор описаний слухов" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="DescriptionText"
+                           Text="Встроенный справочник остаётся неизменным; ваши правки сохраняются отдельным пользовательским файлом."
+                           Style="{StaticResource AppMutedText}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <Button x:Name="OpenJsonButton" Grid.Column="1" Content="Открыть файл правок (JSON)"
+                    ToolTip="Открывает отдельный пользовательский файл, в котором хранятся только ваши изменения и отключённые встроенные записи."
+                    Style="{StaticResource AppButton}" VerticalAlignment="Center" Click="OpenJsonButton_Click"/>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource AppCard}" Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="10"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBox x:Name="SearchBox" Grid.Row="0" Style="{StaticResource AppTextBox}"
+                             ToolTip="Поиск по ID, фразе и названию" TextChanged="Filter_Changed"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="KindFilter" Style="{StaticResource AppComboBox}" SelectionChanged="Filter_Changed">
+                            <ComboBoxItem Tag="">Все категории</ComboBoxItem>
+                            <ComboBoxItem Tag="expedition">Экспедиция</ComboBoxItem>
+                            <ComboBoxItem Tag="boss">Босс</ComboBoxItem>
+                            <ComboBoxItem Tag="unique">Уникальная карта</ComboBoxItem>
+                        </ComboBox>
+                        <ComboBox x:Name="TierFilter" Grid.Column="2" Style="{StaticResource AppComboBox}" SelectionChanged="Filter_Changed">
+                            <ComboBoxItem Tag="">Все тиры</ComboBoxItem>
+                            <ComboBoxItem Tag="S+">S+</ComboBoxItem>
+                            <ComboBoxItem Tag="S">S</ComboBoxItem>
+                            <ComboBoxItem Tag="A">A</ComboBoxItem>
+                            <ComboBoxItem Tag="B">B</ComboBoxItem>
+                            <ComboBoxItem Tag="C">C</ComboBoxItem>
+                            <ComboBoxItem Tag="D">D</ComboBoxItem>
+                            <ComboBoxItem Tag="NONE">Без тира</ComboBoxItem>
+                        </ComboBox>
+                    </Grid>
+                    <ListBox x:Name="EntriesList" Grid.Row="4" Background="#0C121C" Foreground="White"
+                             BorderBrush="#34445F" BorderThickness="1" Padding="3"
+                             ItemContainerStyle="{StaticResource AppListBoxItem}"
+                             SelectionChanged="EntriesList_SelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="2,2" Opacity="{Binding DisplayOpacity}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="4"/>
+                                        <ColumnDefinition Width="34"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Background="{Binding KindAccentColor}" CornerRadius="2" Margin="0,2,0,2"/>
+                                    <Image Grid.Column="1" Source="{Binding KindIconPath}" Width="24" Height="24"
+                                           Stretch="Uniform" VerticalAlignment="Center" Margin="5,0,5,0"/>
+                                    <StackPanel Grid.Column="2" Margin="3,3,6,3">
+                                        <TextBlock Text="{Binding PrimaryPhrase}" FontFamily="{DynamicResource AppSemiBoldFontFamily}"
+                                                   FontSize="13.5" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Id}" Foreground="#8191A8" FontSize="10.5"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding DisabledDisplay}" Foreground="#FF8A94" FontSize="10.5"
+                                                   FontFamily="{DynamicResource AppSemiBoldFontFamily}"/>
+                                    </StackPanel>
+                                    <Border Grid.Column="3" Background="#162335" BorderBrush="{Binding KindAccentColor}"
+                                            BorderThickness="1" CornerRadius="6" Padding="7,3" Margin="2,0"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding RatingDisplay}" Foreground="White" FontSize="10.5"
+                                                   FontFamily="{DynamicResource AppSemiBoldFontFamily}"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <Grid Grid.Row="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="AddButton" Content="＋ Добавить" Style="{StaticResource AppButton}" Click="AddButton_Click"/>
+                        <Button x:Name="DeleteButton" Grid.Column="2" Content="Отключить" Style="{StaticResource DangerButton}" Click="DeleteButton_Click"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource AppCard}" Padding="14">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="EditorPanel" Margin="0,0,12,0">
+                        <TextBlock x:Name="NoSelectionText" Text="Выберите запись или добавьте новую."
+                                   Foreground="#91A0B4" FontSize="15" HorizontalAlignment="Center" Margin="0,160,0,0"/>
+                        <StackPanel x:Name="FieldsPanel" Visibility="Collapsed">
+                            <TextBlock x:Name="IdentityHeaderText" Text="Идентификация и OCR" Style="{StaticResource AppSectionTitle}"/>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="130"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="ID" Style="{StaticResource AppLabel}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="IdBox" Style="{StaticResource AppTextBox}"/>
+                                        <Button x:Name="GenerateIdButton" Grid.Column="2" Content="Сгенерировать"
+                                                Style="{StaticResource AppButton}" Padding="10,6"
+                                                ToolTip="Сформировать ID из категории и основной OCR-фразы"
+                                                Click="GenerateIdButton_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock x:Name="KindLabel" Text="Категория" Style="{StaticResource AppLabel}"/>
+                                    <ComboBox x:Name="KindCombo" Style="{StaticResource AppComboBox}">
+                                        <ComboBoxItem Tag="expedition">Экспедиция</ComboBoxItem>
+                                        <ComboBoxItem Tag="boss">Босс</ComboBoxItem>
+                                        <ComboBoxItem Tag="unique">Уникальная карта</ComboBoxItem>
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock x:Name="TierLabel" Text="Тир" Style="{StaticResource AppLabel}"/>
+                                    <ComboBox x:Name="TierCombo" Style="{StaticResource AppComboBox}">
+                                        <ComboBoxItem Tag="">Без тира</ComboBoxItem>
+                                        <ComboBoxItem Tag="S+">S+</ComboBoxItem>
+                                        <ComboBoxItem Tag="S">S</ComboBoxItem>
+                                        <ComboBoxItem Tag="A">A</ComboBoxItem>
+                                        <ComboBoxItem Tag="B">B</ComboBoxItem>
+                                        <ComboBoxItem Tag="C">C</ComboBoxItem>
+                                        <ComboBoxItem Tag="D">D</ComboBoxItem>
+                                    </ComboBox>
+                                </StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="160"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock x:Name="PhrasesLabel" Text="Фразы OCR — по одной на строку" Style="{StaticResource AppLabel}"/>
+                                    <TextBox x:Name="PhrasesBox" Style="{StaticResource AppTextBox}" Height="92"
+                                             AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,8"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock x:Name="PriorityLabel" Text="Приоритет" Style="{StaticResource AppLabel}"/>
+                                    <TextBox x:Name="PriorityBox" Style="{StaticResource AppTextBox}"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Background="#0E1723" BorderBrush="#2B3C55" BorderThickness="1"
+                                    CornerRadius="8" Padding="10" Margin="0,10,0,0">
+                                <StackPanel>
+                                    <TextBlock x:Name="TagsLabel" Text="Теги" Style="{StaticResource AppLabel}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="TagSelectorCombo" Style="{StaticResource AppComboBox}"/>
+                                        <Button x:Name="AddTagButton" Grid.Column="2" Content="Добавить"
+                                                Style="{StaticResource AppButton}" Padding="10,6" Click="AddTagButton_Click"/>
+                                        <TextBox x:Name="NewTagBox" Grid.Column="4" Style="{StaticResource AppTextBox}"
+                                                 ToolTip="Новый тег: строчные латинские буквы, цифры и дефисы"/>
+                                        <Button x:Name="CreateTagButton" Grid.Column="6" Content="Создать"
+                                                Style="{StaticResource AppButton}" Padding="10,6" Click="CreateTagButton_Click"/>
+                                    </Grid>
+                                    <ListBox x:Name="TagsList" Margin="0,8,0,0" MinHeight="44" MaxHeight="92"
+                                             Background="Transparent" BorderThickness="0" Padding="0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Focusable" Value="False"/>
+                                                <Setter Property="Margin" Value="0,0,6,6"/>
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <ContentPresenter/>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#18304A" BorderBrush="#3E719F" BorderThickness="1"
+                                                        CornerRadius="7" Padding="8,4,4,4">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding}" Foreground="#DCEBFA" VerticalAlignment="Center"/>
+                                                        <Button Content="×" Margin="6,0,0,0" Width="22" Height="22" Padding="0"
+                                                                Background="Transparent" BorderThickness="0" Foreground="#AFC4DA"
+                                                                Cursor="Hand" CommandParameter="{Binding}" Click="RemoveTagButton_Click"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <Separator Margin="0,16,0,14" Background="#34445F"/>
+                            <TextBlock x:Name="LocalizedHeaderText" Text="Отображаемые данные" Style="{StaticResource AppSectionTitle}"/>
+                            <TextBlock x:Name="LocalizedHintText" Text="Русские и английские поля независимы; пустое английское поле использует русский fallback."
+                                       Style="{StaticResource AppMutedText}" Margin="0,4,0,12"/>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Название RU" Style="{StaticResource AppLabel}"/>
+                                    <TextBox x:Name="TitleRuBox" Style="{StaticResource AppTextBox}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Title EN" Style="{StaticResource AppLabel}"/>
+                                    <TextBox x:Name="TitleEnBox" Style="{StaticResource AppTextBox}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Карта RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="MapRuBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Map EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="MapEnBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Тип карты RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="MapTypeRuBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Map type EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="MapTypeEnBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Модификаторы RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="ModsRuBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Modifiers EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="ModsEnBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Награда RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="ResultRuBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Reward EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="ResultEnBox" Style="{StaticResource AppTextBox}"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Описание RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="DetailRuBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Description EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="DetailEnBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Заметка RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="NoteRuBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Note EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="NoteEnBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Пояснение рейтинга RU" Style="{StaticResource AppLabel}"/><TextBox x:Name="RatingNotesRuBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Rating notes EN" Style="{StaticResource AppLabel}"/><TextBox x:Name="RatingNotesEnBox" Style="{StaticResource AppTextBox}" Height="64" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="10,7"/></StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ValidationText" Foreground="{StaticResource DangerBrush}" FontSize="12.5"
+                       TextWrapping="Wrap" VerticalAlignment="Center"/>
+            <Button x:Name="CancelButton" Grid.Column="1" Content="Закрыть" Style="{StaticResource AppButton}" Click="CancelButton_Click"/>
+            <Button x:Name="SaveButton" Grid.Column="3" Content="Сохранить изменения" Style="{StaticResource PrimaryButton}" Click="SaveButton_Click"/>
+        </Grid>
+    </Grid>
+</mah:MetroWindow>
