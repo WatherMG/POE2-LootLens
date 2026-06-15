@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
@@ -123,11 +122,11 @@ public partial class App : System.Windows.Application
     // is a full second app that also receives the global F3 hook and paints its own overlay —
     // which is how testers ended up seeing two or three calibration boxes at once.
     private static Mutex? _instanceMutex;
+    private static EventWaitHandle? _activationEvent;
+    private static CancellationTokenSource? _activationCancellation;
+    private static int _pendingActivationRequest;
     private const string InstanceMutexName = @"Global\POE2LootLens.SingleInstance";
-
-    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    private const int SW_RESTORE = 9;
+    private const string ActivationEventName = @"Local\POE2LootLens.ActivateMainWindow";
 
     // Hide the overlay immediately (if it's up because a panel was detected) and pause detection
     // briefly so the closing panel's fading brightness can't re-trigger it.
@@ -155,14 +154,24 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         AppFonts.ConfigureWpf(Resources);
 
-        // Refuse to start a second copy: only one instance owns the global hook + overlay.
+        // Every launch opens the same named activation event. A secondary process signals it and
+        // exits; the primary process restores its WPF window even when it currently has no native
+        // MainWindowHandle because it is hidden in the notification area.
+        _activationEvent = new EventWaitHandle(
+            initialState: false,
+            mode: EventResetMode.AutoReset,
+            name: ActivationEventName);
+
+        // Refuse to start a second copy: only one instance owns the global hook + overlays.
         _instanceMutex = new Mutex(initiallyOwned: true, InstanceMutexName, out bool createdNew);
         if (!createdNew)
         {
-            FocusExistingInstance();
+            try { _activationEvent.Set(); } catch { }
             Shutdown();
             return;
         }
+
+        StartActivationListener();
 
         if (e.Args.Contains("--debug"))
         {
@@ -222,6 +231,13 @@ public partial class App : System.Windows.Application
                     (Current.MainWindow as MainWindow)?.NotifyGlobalMousePressed(System.Windows.Forms.Cursor.Position));
         };
         _ = _hook.RunAsync();
+
+        // Create the main window explicitly instead of using StartupUri. This lets a tray-only
+        // launch initialize the application without ever presenting an empty native window frame,
+        // which previously appeared as a black rectangle until the user restored the app.
+        var mainWindow = new MainWindow();
+        MainWindow = mainWindow;
+        mainWindow.StartApplication();
     }
 
     // Runs on a hook thread-pool thread. Esc cancels; a gesture already bound to another action
@@ -290,31 +306,67 @@ public partial class App : System.Windows.Application
     private static void InvokeManualRumorScan() =>
         Current?.Dispatcher.BeginInvoke(() => (Current.MainWindow as MainWindow)?.RequestManualRumorScan());
 
+    private static void StartActivationListener()
+    {
+        _activationCancellation = new CancellationTokenSource();
+        CancellationToken token = _activationCancellation.Token;
+        EventWaitHandle activationEvent = _activationEvent!;
+        _ = Task.Run(() =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    activationEvent.WaitOne();
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+
+                if (token.IsCancellationRequested)
+                    return;
+                RequestMainWindowActivation();
+            }
+        }, token);
+    }
+
+    private static void RequestMainWindowActivation()
+    {
+        Interlocked.Exchange(ref _pendingActivationRequest, 1);
+        App? app = Current as App;
+        if (app is null)
+            return;
+
+        _ = app.Dispatcher.BeginInvoke(() =>
+        {
+            if (app.MainWindow is not MainWindow window)
+                return;
+            Interlocked.Exchange(ref _pendingActivationRequest, 0);
+            window.RestoreFromExternalLaunch();
+        });
+    }
+
+    internal static bool ConsumePendingActivationRequest() =>
+        Interlocked.Exchange(ref _pendingActivationRequest, 0) == 1;
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        // A user-selected close-to-tray policy must never block Windows sign-out or shutdown.
+        (MainWindow as Poe2LootLens.MainWindow)?.AllowApplicationExit();
+        base.OnSessionEnding(e);
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
+        _activationCancellation?.Cancel();
+        try { _activationEvent?.Set(); } catch { }
         _hook?.Dispose();
+        _activationEvent?.Dispose();
+        _activationCancellation?.Dispose();
         _instanceMutex?.Dispose();
         AppFonts.Dispose();
         base.OnExit(e);
-    }
-
-    // Bring the already-running instance's window to the foreground so the user gets feedback that
-    // the app is up (instead of "nothing happened, click again" — which spawned the extra copies).
-    private static void FocusExistingInstance()
-    {
-        try
-        {
-            var me = Process.GetCurrentProcess();
-            foreach (var p in Process.GetProcessesByName(me.ProcessName))
-            {
-                if (p.Id == me.Id) continue;
-                if (p.MainWindowHandle == IntPtr.Zero) continue;
-                ShowWindow(p.MainWindowHandle, SW_RESTORE);
-                SetForegroundWindow(p.MainWindowHandle);
-                break;
-            }
-        }
-        catch { /* best-effort focus; the guard still prevents the second instance */ }
     }
 
     private static void RunOcrTest(string imagePath)

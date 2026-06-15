@@ -44,6 +44,7 @@ internal sealed class PriceRepository : IDisposable
 
     private static readonly string[] ExchangeTypes =
         ["Verisium", "Runes", "Expedition", "Currency", "UncutGems"];
+    private static readonly string[] OptionalExchangeTypes = ["LineageSupportGems"];
 
     public PriceRepository(HttpClient http) => _http = http;
 
@@ -104,6 +105,8 @@ internal sealed class PriceRepository : IDisposable
             // the one-time launch fetch and every scheduled refresh finish as quickly as the slowest call.
             var priceTasks = ExchangeTypes
                 .Select(type => FetchTypeAsync(config.LeagueName, type, cancellationToken))
+                .Concat(OptionalExchangeTypes.Select(type =>
+                    FetchOptionalTypeAsync(config.LeagueName, type, cancellationToken)))
                 .ToArray();
             var localizedNamesTask = FetchLocalizedNamesAsync(
                 config.GameLanguage,
@@ -207,6 +210,28 @@ internal sealed class PriceRepository : IDisposable
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         return ParsePriceResponse(json);
+    }
+
+    private async Task<Dictionary<string, PricedItem>> FetchOptionalTypeAsync(
+        string league,
+        string type,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await FetchTypeAsync(league, type, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Optional economy categories must never make the established currency/rune snapshot
+            // unusable when poe.ninja temporarily removes or renames an endpoint.
+            Console.Error.WriteLine($"[PriceRepository] optional {type} failed: {exception.Message}");
+            return new Dictionary<string, PricedItem>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private async Task<Dictionary<string, string>> FetchLocalizedNamesAsync(

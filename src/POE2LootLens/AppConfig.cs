@@ -5,7 +5,7 @@ namespace Poe2LootLens;
 
 internal sealed class AppConfig
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 7;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string LeagueName { get; set; } = "Runes of Aldur";
@@ -42,9 +42,19 @@ internal sealed class AppConfig
     public string LogLevel { get; set; } = "info";
     public int LogMaxFileSizeMb { get; set; } = 10;
     public int LogRetainedFiles { get; set; } = 5;
+    // Startup behaviour is explicit: a fresh installation always opens the main window, while
+    // subsequent launches may start in the tray when the user opts in.
+    public bool FirstRunCompleted { get; set; }
+    public bool StartMinimized { get; set; }
+    public bool CloseToTray { get; set; }
+    public bool AutoStartPriceScanner { get; set; }
+    public bool AutoStartRumorScanner { get; set; }
+
     // Persisted so the close-to-tray explanation is shown only once for each user profile.
     public bool TrayHintShown { get; set; }
 
+    // Runtime state retained for backwards-compatible config round-trips. Startup is controlled only
+    // by AutoStartRumorScanner so manually stopping/starting a module never changes startup policy.
     public bool RumorScannerEnabled { get; set; }
     public string RumorCatalogPath { get; set; } = "rumor_catalog.default.json";
     public string RumorUserCatalogPath { get; set; } = "rumor_catalog.user.json";
@@ -54,6 +64,7 @@ internal sealed class AppConfig
     // Legacy serialized value retained only so old config files round-trip cleanly; no UI uses it.
     public int RumorOverlayHideDelayMs { get; set; } = 650;
     public int RumorOverlayTimeoutSeconds { get; set; } = 15;
+    public bool RumorOverlayPinnedByDefault { get; set; }
 
     // auto | manual. Manual is the safe default; it can be triggered from the main-window button
     // even when no global hotkey is configured. Auto means hover-driven experimental scanning.

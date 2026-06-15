@@ -38,6 +38,8 @@ internal sealed class RumorLineOverlayForm : Form
     private bool _debug;
     private Rectangle _lastPanel = Rectangle.Empty;
     private Rectangle _railBounds = Rectangle.Empty;
+    private bool _gameForeground = true;
+    private bool _explicitlyHidden;
 
     public RumorLineOverlayForm()
     {
@@ -74,12 +76,6 @@ internal sealed class RumorLineOverlayForm : Form
         }
     }
 
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        try { SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
-    }
-
     public void ApplyState(RumorLineOverlayState state)
     {
         if (IsDisposed)
@@ -91,7 +87,8 @@ internal sealed class RumorLineOverlayForm : Form
         }
 
         _state = state;
-        if (!state.Visible || state.PanelBounds.IsEmpty || state.Lines.Count == 0)
+        _explicitlyHidden = false;
+        if (!_gameForeground || !state.Visible || state.PanelBounds.IsEmpty || state.Lines.Count == 0)
         {
             _animationTimer.Stop();
             Hide();
@@ -153,6 +150,30 @@ internal sealed class RumorLineOverlayForm : Form
         screenRectangle.Width,
         screenRectangle.Height);
 
+    public void SetGameForeground(bool active)
+    {
+        if (IsDisposed)
+            return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => SetGameForeground(active)); } catch { }
+            return;
+        }
+        if (_gameForeground == active)
+            return;
+
+        _gameForeground = active;
+        if (!active)
+        {
+            _animationTimer.Stop();
+            Hide();
+            return;
+        }
+
+        if (!_explicitlyHidden)
+            ApplyState(_state);
+    }
+
     public void HideNow()
     {
         if (IsDisposed)
@@ -163,6 +184,7 @@ internal sealed class RumorLineOverlayForm : Form
             return;
         }
         _animationTimer.Stop();
+        _explicitlyHidden = true;
         Hide();
     }
 
@@ -268,12 +290,6 @@ internal sealed class RumorLineOverlayForm : Form
 
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
-    private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(
@@ -313,6 +329,13 @@ internal static class RumorLineOverlayManager
         RumorLineOverlayForm? form = _form;
         if (form is not null && !form.IsDisposed)
             form.HideNow();
+    }
+
+    public static void SetGameForeground(bool active)
+    {
+        RumorLineOverlayForm? form = _form;
+        if (form is not null && !form.IsDisposed)
+            form.SetGameForeground(active);
     }
 
     public static bool ContainsScreenPoint(Point point)

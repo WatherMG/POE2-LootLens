@@ -252,6 +252,20 @@ public class RumorScannerImageGateTests
 
         Assert.False(RumorScanner.LooksLikeRumorPanelImage(bitmap));
     }
+
+    [Fact]
+    public void ParchmentGate_RejectsPortraitRewardBook()
+    {
+        using var bitmap = new System.Drawing.Bitmap(680, 782,
+            System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        graphics.Clear(System.Drawing.Color.FromArgb(18, 62, 70));
+        using var parchment = new System.Drawing.SolidBrush(
+            System.Drawing.Color.FromArgb(205, 190, 150));
+        graphics.FillRectangle(parchment, 80, 55, 510, 660);
+
+        Assert.False(RumorScanner.LooksLikeRumorPanelImage(bitmap));
+    }
 }
 
 public class RumorCatalogOverrideTests

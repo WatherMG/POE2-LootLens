@@ -19,6 +19,11 @@ public class ConfigStoreTests
         Assert.False(cfg.IsCalibrated);
         Assert.Equal("en", cfg.RumorOcrLanguage);
         Assert.Equal("manual", cfg.RumorScanMode);
+        Assert.False(cfg.StartMinimized);
+        Assert.False(cfg.CloseToTray);
+        Assert.False(cfg.AutoStartPriceScanner);
+        Assert.False(cfg.AutoStartRumorScanner);
+        Assert.False(cfg.RumorOverlayPinnedByDefault);
     }
 
     [Fact]
@@ -102,6 +107,12 @@ public class ConfigStoreTests
             ReferencePixelColor = "#AABBCC",
             CustomPricesPath = "my_prices.json",
             TrayHintShown = true,
+            FirstRunCompleted = true,
+            StartMinimized = true,
+            CloseToTray = true,
+            AutoStartPriceScanner = true,
+            AutoStartRumorScanner = true,
+            RumorOverlayPinnedByDefault = true,
             StartStopHotkey = "Ctrl+Shift+VcF8",
         };
         SaveTo(dir.Path, original);
@@ -112,6 +123,12 @@ public class ConfigStoreTests
         Assert.Equal("#AABBCC", loaded.ReferencePixelColor);
         Assert.Equal("my_prices.json", loaded.CustomPricesPath);
         Assert.True(loaded.TrayHintShown);
+        Assert.True(loaded.FirstRunCompleted);
+        Assert.True(loaded.StartMinimized);
+        Assert.True(loaded.CloseToTray);
+        Assert.True(loaded.AutoStartPriceScanner);
+        Assert.True(loaded.AutoStartRumorScanner);
+        Assert.True(loaded.RumorOverlayPinnedByDefault);
         Assert.Equal("Ctrl+Shift+VcF8", loaded.StartStopHotkey);
     }
 

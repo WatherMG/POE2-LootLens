@@ -17,6 +17,8 @@ public partial class MainWindow : MetroWindow
     private IconCache? _icons;
     private ScanEngine? _engine;
     private RumorScanner? _rumorScanner;
+    private readonly ModuleStateMachine _priceModuleState = new();
+    private readonly ModuleStateMachine _rumorModuleState = new();
     private RumorCatalog? _rumorCatalog;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly SemaphoreSlim _dataOperationGate = new(1, 1);
@@ -26,31 +28,63 @@ public partial class MainWindow : MetroWindow
     private DateTime _nextManualRefreshAtUtc = DateTime.MinValue;
     private bool _dataControlsEnabled;
     private bool _calibrationInProgress;
-    private bool _engineOperationInProgress;
-    private bool _rumorOperationInProgress;
+    private bool _diagnosticsExportInProgress;
     private bool _closing;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _trayBalloonShown;
     private bool _allowExit;
+    private readonly bool _startHiddenOnLaunch;
+    private bool _restoreRequested;
+    private bool _startupStarted;
 
     public MainWindow()
     {
         InitializeComponent();
+        _config = ConfigStore.Load();
+        bool firstRun = !_config.FirstRunCompleted;
+        bool activationRequested = App.ConsumePendingActivationRequest();
+        _startHiddenOnLaunch = _config.StartMinimized && !firstRun && !activationRequested;
+        _restoreRequested = activationRequested;
+        if (firstRun)
+        {
+            _config.FirstRunCompleted = true;
+            try { ConfigStore.Save(_config); } catch { }
+        }
+
         VersionLabel.Text = GetDisplayVersion();
         _refreshCooldownTimer.Tick += (_, _) => UpdateRefreshCooldownUi();
-        Loaded += OnLoaded;
         StateChanged += OnStateChanged;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    internal void StartApplication()
     {
-        _config = ConfigStore.Load();
+        if (_startupStarted)
+            return;
+        _startupStarted = true;
+
+        if (App.ConsumePendingActivationRequest())
+            _restoreRequested = true;
         _trayBalloonShown = _config.TrayHintShown;
         ApplyHotkeys();
         ApplyUiLanguage();
         RefreshModuleUi();
         _refreshCooldownTimer.Start();
-        await StartupAsync();
+
+        if (_startHiddenOnLaunch && !_restoreRequested)
+        {
+            // Do not call Show/Hide for a tray-only launch. Creating a native WPF window and hiding
+            // it from Loaded left a black rectangle on some systems for the first rendered frame.
+            ShowInTaskbar = false;
+            EnsureTrayIcon();
+            _trayIcon!.Visible = true;
+        }
+        else
+        {
+            ShowInTaskbar = true;
+            Show();
+        }
+
+        _ = StartupAsync(applyModuleAutoStart: true);
     }
 
     private static string GetDisplayVersion()
@@ -61,13 +95,12 @@ public partial class MainWindow : MetroWindow
         if (!string.IsNullOrWhiteSpace(informational))
             return $"v{informational.Split('+')[0]}";
         var version = Assembly.GetExecutingAssembly().GetName().Version;
-        return version is null ? "v0.9.0-beta.11" : $"v{version.Major}.{version.Minor}.{version.Build}";
+        return version is null ? "v0.9.0-beta" : $"v{version.Major}.{version.Minor}.{version.Build}";
     }
 
-    private async Task StartupAsync()
+    private async Task StartupAsync(bool applyModuleAutoStart = false)
     {
         await _dataOperationGate.WaitAsync();
-        bool dataReady = false;
         try
         {
             SetDataControlsEnabled(false);
@@ -103,28 +136,29 @@ public partial class MainWindow : MetroWindow
                 return;
             }
 
-            dataReady = true;
             _nextManualRefreshAtUtc = DateTime.UtcNow + ManualRefreshCooldown;
             UpdateStatusLabel();
             SetStatusPill(T("ГОТОВ", "READY"), "#56D69A");
 
-            if (_config.RumorScannerEnabled && _rumorScanner is null)
+            if (applyModuleAutoStart && _config.AutoStartPriceScanner)
             {
-                try
+                if (_config.IsCalibrated)
                 {
-                    OcrDataStatus rumorOcr = await OcrDataManager.EnsureRumorAsync(
-                        _http,
-                        _config.RumorOcrLanguage);
-                    if (!rumorOcr.Success)
-                        throw new InvalidOperationException(rumorOcr.Message);
-                    StartRumorScanner();
+                    StartEngine();
                 }
-                catch (Exception exception)
+                else
                 {
-                    _config.RumorScannerEnabled = false;
-                    ConfigStore.Save(_config);
-                    RumorScannerStatusLabel.Text = T("Не удалось запустить: ", "Could not start: ") + exception.Message;
+                    StatusLabel.Text = T(
+                        "Цены загружены. Автозапуск оценщика пропущен: сначала выберите область захвата.",
+                        "Prices loaded. Price-scanner autostart was skipped: select a capture area first.");
                 }
+            }
+
+            if (applyModuleAutoStart &&
+                _config.AutoStartRumorScanner &&
+                _rumorModuleState.Snapshot.State is ModuleState.Stopped or ModuleState.Faulted)
+            {
+                await StartRumorScannerAsync(ensureOcrModel: true);
             }
         }
         catch (Exception exception)
@@ -135,7 +169,6 @@ public partial class MainWindow : MetroWindow
         finally
         {
             SetDataControlsEnabled(true);
-            StartStopButton.IsEnabled = dataReady && _config.IsCalibrated && !_calibrationInProgress;
             UpdateRefreshCooldownUi();
             RefreshModuleUi();
             _dataOperationGate.Release();
@@ -178,8 +211,9 @@ public partial class MainWindow : MetroWindow
                 StatusLabel.Text = ocrStatus.Success
                     ? BuildStatusText()
                     : T("Цены обновлены, но ", "Prices updated, but ") + ocrStatus.Message;
-                SetStatusPill(_engine is null ? T("ГОТОВ", "READY") : T("РАБОТАЕТ", "RUNNING"),
-                    _engine is null ? "#56D69A" : "#59A9FF");
+                bool priceRunning = _priceModuleState.Snapshot.IsRunning;
+                SetStatusPill(priceRunning ? T("РАБОТАЕТ", "RUNNING") : T("ГОТОВ", "READY"),
+                    priceRunning ? "#59A9FF" : "#56D69A");
             }
         }
         catch (Exception exception)
@@ -200,14 +234,21 @@ public partial class MainWindow : MetroWindow
     private void SetDataControlsEnabled(bool enabled)
     {
         _dataControlsEnabled = enabled;
+        ModuleStateSnapshot priceState = _priceModuleState.Snapshot;
+        ModuleStateSnapshot rumorState = _rumorModuleState.Snapshot;
         GeneralSettingsButton.IsEnabled = enabled;
         RefreshDataButton.IsEnabled = enabled;
-        CalibrateButton.IsEnabled = enabled && !_calibrationInProgress;
-        StartStopButton.IsEnabled = enabled && _config.IsCalibrated && _repo is { ItemCount: > 0 } && !_calibrationInProgress;
-        PriceSettingsButton.IsEnabled = enabled;
-        RumorSettingsButton.IsEnabled = enabled && !_rumorOperationInProgress;
-        ToggleRumorScannerButton.IsEnabled = enabled && !_rumorOperationInProgress;
-        ManualRumorScanButton.IsEnabled = enabled && _rumorScanner is not null;
+        CalibrateButton.IsEnabled = enabled && !_calibrationInProgress && !priceState.IsBusy;
+        StartStopButton.IsEnabled = enabled &&
+                                    !_calibrationInProgress &&
+                                    !priceState.IsBusy &&
+                                    (priceState.IsRunning ||
+                                     (_config.IsCalibrated && _repo is { ItemCount: > 0 }));
+        PriceSettingsButton.IsEnabled = enabled && !priceState.IsBusy;
+        RumorSettingsButton.IsEnabled = enabled && !rumorState.IsBusy;
+        ToggleRumorScannerButton.IsEnabled = enabled && !rumorState.IsBusy;
+        ManualRumorScanButton.IsEnabled = enabled && rumorState.IsRunning;
+        ExportDiagnosticsButton.IsEnabled = !_diagnosticsExportInProgress;
         UpdateRefreshCooldownUi();
     }
 
@@ -279,12 +320,33 @@ public partial class MainWindow : MetroWindow
     private void RefreshModuleUi()
     {
         UpdateRegionLabel();
-        bool priceRunning = _engine is not null;
-        PriceModuleStatusText.Text = priceRunning ? T("Работает", "Running") : T("Остановлен", "Stopped");
-        PriceStatusDot.Fill = BrushFrom(priceRunning ? "#59A9FF" : "#75849A");
-        StartStopButton.Content = priceRunning ? T("Остановить", "Stop") : T("Запустить", "Start");
-        StartStopButton.Background = priceRunning ? BrushFrom("#71303C") : (System.Windows.Media.Brush)FindResource("AccentStrongBrush");
-        StartStopButton.IsEnabled = _dataControlsEnabled && _config.IsCalibrated && _repo is { ItemCount: > 0 };
+        ModuleStateSnapshot priceState = _priceModuleState.Snapshot;
+        ModuleStateSnapshot rumorState = _rumorModuleState.Snapshot;
+
+        GeneralSettingsButton.IsEnabled = _dataControlsEnabled && !priceState.IsBusy && !rumorState.IsBusy;
+        CalibrateButton.IsEnabled = _dataControlsEnabled && !_calibrationInProgress && !priceState.IsBusy;
+        PriceSettingsButton.IsEnabled = _dataControlsEnabled && !priceState.IsBusy;
+        RumorSettingsButton.IsEnabled = _dataControlsEnabled && !rumorState.IsBusy;
+
+        PriceModuleStatusText.Text = ModuleStateText(priceState.State);
+        PriceModuleStatusText.ToolTip = priceState.LastError;
+        PriceStatusDot.Fill = BrushFrom(ModuleStateColor(priceState.State));
+        StartStopButton.Content = priceState.State switch
+        {
+            ModuleState.Running => T("Остановить", "Stop"),
+            ModuleState.Starting => T("Запуск…", "Starting…"),
+            ModuleState.Stopping => T("Остановка…", "Stopping…"),
+            ModuleState.Faulted => T("Повторить", "Retry"),
+            _ => T("Запустить", "Start"),
+        };
+        StartStopButton.Background = priceState.IsRunning
+            ? BrushFrom("#71303C")
+            : (System.Windows.Media.Brush)FindResource("AccentStrongBrush");
+        StartStopButton.IsEnabled = _dataControlsEnabled &&
+                                    !_calibrationInProgress &&
+                                    !priceState.IsBusy &&
+                                    (priceState.IsRunning ||
+                                     (_config.IsCalibrated && _repo is { ItemCount: > 0 }));
 
         string uiLanguage = UiLanguage.Resolve(_config.UiLanguage);
         string priceToggle = HotkeyBinding.DisplayOptional(_config.StartStopHotkey, uiLanguage);
@@ -303,14 +365,41 @@ public partial class MainWindow : MetroWindow
         RumorHotkeySummaryText.Text = T(
             $"Модуль: {rumorToggle} · Сканировать: {rumorScan} · Отладка: {rumorDebug}",
             $"Module: {rumorToggle} · Scan: {rumorScan} · Debug: {rumorDebug}");
-        bool rumorRunning = _rumorScanner is not null;
-        RumorModuleStatusText.Text = rumorRunning ? T("Работает", "Running") : T("Остановлен", "Stopped");
-        RumorStatusDot.Fill = BrushFrom(rumorRunning ? "#59A9FF" : "#75849A");
-        ToggleRumorScannerButton.Content = rumorRunning ? T("Остановить", "Stop") : T("Запустить", "Start");
-        ToggleRumorScannerButton.Background = rumorRunning ? BrushFrom("#71303C") : (System.Windows.Media.Brush)FindResource("AccentStrongBrush");
+        RumorModuleStatusText.Text = ModuleStateText(rumorState.State);
+        RumorModuleStatusText.ToolTip = rumorState.LastError;
+        RumorStatusDot.Fill = BrushFrom(ModuleStateColor(rumorState.State));
+        ToggleRumorScannerButton.Content = rumorState.State switch
+        {
+            ModuleState.Running => T("Остановить", "Stop"),
+            ModuleState.Starting => T("Запуск…", "Starting…"),
+            ModuleState.Stopping => T("Остановка…", "Stopping…"),
+            ModuleState.Faulted => T("Повторить", "Retry"),
+            _ => T("Запустить", "Start"),
+        };
+        ToggleRumorScannerButton.Background = rumorState.IsRunning
+            ? BrushFrom("#71303C")
+            : (System.Windows.Media.Brush)FindResource("AccentStrongBrush");
+        ToggleRumorScannerButton.IsEnabled = _dataControlsEnabled && !rumorState.IsBusy;
         ManualRumorScanButton.Visibility = Visibility.Visible;
-        ManualRumorScanButton.IsEnabled = rumorRunning;
+        ManualRumorScanButton.IsEnabled = _dataControlsEnabled && rumorState.IsRunning;
     }
+
+    private string ModuleStateText(ModuleState state) => state switch
+    {
+        ModuleState.Starting => T("Запускается", "Starting"),
+        ModuleState.Running => T("Работает", "Running"),
+        ModuleState.Stopping => T("Останавливается", "Stopping"),
+        ModuleState.Faulted => T("Ошибка", "Faulted"),
+        _ => T("Остановлен", "Stopped"),
+    };
+
+    private static string ModuleStateColor(ModuleState state) => state switch
+    {
+        ModuleState.Running => "#59A9FF",
+        ModuleState.Starting or ModuleState.Stopping => "#FFBF69",
+        ModuleState.Faulted => "#FF7272",
+        _ => "#75849A",
+    };
 
     private void UpdateRegionLabel()
     {
@@ -321,17 +410,22 @@ public partial class MainWindow : MetroWindow
 
     internal async void RunCalibration()
     {
-        if (_calibrationInProgress || _engineOperationInProgress || _closing)
+        ModuleStateSnapshot priceState = _priceModuleState.Snapshot;
+        if (_calibrationInProgress || priceState.IsBusy || _closing)
             return;
+
         _calibrationInProgress = true;
-        _engineOperationInProgress = true;
-        bool restart = _engine is not null;
+        bool restart = priceState.IsRunning;
         string previousStatus = StatusLabel.Text;
         try
         {
             SetDataControlsEnabled(false);
             StatusLabel.Text = T("Подготовка выбора области…", "Preparing area selection…");
-            if (restart) await StopEngineAsync(); else PriceOverlayManager.HideNow();
+            if (restart)
+                await StopEngineAsync();
+            else
+                PriceOverlayManager.HideNow();
+
             StatusLabel.Text = T("Выделите список наград и нажмите Enter…", "Select the reward list and press Enter…");
             DrawingRectangle? rectangle = await Task.Run(CalibrationOverlay.RunOnStaThread);
             if (rectangle is null)
@@ -339,6 +433,7 @@ public partial class MainWindow : MetroWindow
                 StatusLabel.Text = previousStatus;
                 return;
             }
+
             _config.RegionRect = rectangle.Value;
             ConfigStore.Save(_config);
             UpdateRegionLabel();
@@ -351,9 +446,9 @@ public partial class MainWindow : MetroWindow
         finally
         {
             _calibrationInProgress = false;
-            _engineOperationInProgress = false;
             SetDataControlsEnabled(true);
-            if (restart && _config.IsCalibrated) StartEngine();
+            if (restart && _config.IsCalibrated)
+                StartEngine();
             RefreshModuleUi();
         }
     }
@@ -370,136 +465,199 @@ public partial class MainWindow : MetroWindow
 
     internal async void ToggleStartStop()
     {
-        if (_engineOperationInProgress || _calibrationInProgress || _closing)
+        ModuleStateSnapshot state = _priceModuleState.Snapshot;
+        if (state.IsBusy || _calibrationInProgress || _closing)
             return;
-        _engineOperationInProgress = true;
+
+        if (state.IsRunning)
+        {
+            await StopEngineAsync();
+            return;
+        }
+
+        if (!_config.IsCalibrated)
+        {
+            StatusLabel.Text = T("Сначала выберите область захвата.", "Select a capture area first.");
+            return;
+        }
+
+        StartEngine();
+    }
+
+    private bool StartEngine()
+    {
+        if (!_priceModuleState.TryBeginStart())
+            return false;
+
+        RefreshModuleUi();
+        ScanEngine? engine = null;
         try
         {
-            if (_engine is null)
-            {
-                if (!_config.IsCalibrated)
-                {
-                    StatusLabel.Text = T("Сначала выберите область захвата.", "Select a capture area first.");
-                    return;
-                }
-                StartEngine();
-            }
-            else
-            {
-                await StopEngineAsync();
-            }
+            if (_repo is null || _icons is null || _repo.ItemCount <= 0)
+                throw new InvalidOperationException(T("Данные рынка ещё не загружены.", "Market data is not loaded yet."));
+            if (!_config.IsCalibrated)
+                throw new InvalidOperationException(T("Область захвата не выбрана.", "The capture area is not configured."));
+
+            engine = new ScanEngine(_config, _repo, _icons);
+            engine.Start();
+            _engine = engine;
+            _priceModuleState.MarkRunning();
+            SetStatusPill(T("РАБОТАЕТ", "RUNNING"), "#59A9FF");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            try { engine?.Dispose(); } catch { }
+            _engine = null;
+            _priceModuleState.MarkFaulted(exception);
+            StatusLabel.Text = T("Не удалось запустить оценщик: ", "Could not start the price scanner: ") + exception.Message;
+            SetStatusPill(T("ОШИБКА", "ERROR"), "#FF7272");
+            return false;
         }
         finally
         {
-            _engineOperationInProgress = false;
             RefreshModuleUi();
         }
     }
 
-    private void StartEngine()
-    {
-        if (_engine is not null || _repo is null || _icons is null || !_config.IsCalibrated)
-            return;
-        _engine = new ScanEngine(_config, _repo, _icons);
-        _engine.Start();
-        SetStatusPill(T("РАБОТАЕТ", "RUNNING"), "#59A9FF");
-        RefreshModuleUi();
-    }
-
     private async Task StopEngineAsync()
     {
-        var engine = _engine;
-        if (engine is null)
+        if (!_priceModuleState.TryBeginStop())
             return;
+
+        ScanEngine? engine = _engine;
         _engine = null;
-        // Dispose the overlay window with the engine so its rescan/close callbacks cannot
-        // keep pointing at a stopped ScanEngine after the module is started again.
-        PriceOverlayManager.Hide();
-        await Task.Run(() =>
-        {
-            engine.StopAndWait(TimeSpan.FromSeconds(3));
-            engine.Dispose();
-        });
-        SetStatusPill(T("ГОТОВ", "READY"), "#56D69A");
         RefreshModuleUi();
+        try
+        {
+            PriceOverlayManager.Hide();
+            if (engine is not null)
+            {
+                await Task.Run(() =>
+                {
+                    try { engine.StopAndWait(TimeSpan.FromSeconds(3)); }
+                    finally { engine.Dispose(); }
+                });
+            }
+            _priceModuleState.MarkStopped();
+            SetStatusPill(T("ГОТОВ", "READY"), "#56D69A");
+        }
+        catch (Exception exception)
+        {
+            _priceModuleState.MarkFaulted(exception);
+            StatusLabel.Text = T("Ошибка остановки оценщика: ", "Price-scanner stop error: ") + exception.Message;
+            SetStatusPill(T("ОШИБКА", "ERROR"), "#FF7272");
+        }
+        finally
+        {
+            RefreshModuleUi();
+        }
     }
 
     private void ToggleRumorScannerButton_Click(object sender, RoutedEventArgs e) => ToggleRumorScanner();
 
     internal async void ToggleRumorScanner()
     {
-        if (_rumorOperationInProgress || _closing)
+        ModuleStateSnapshot state = _rumorModuleState.Snapshot;
+        if (state.IsBusy || _closing)
             return;
-        _rumorOperationInProgress = true;
+
+        if (state.IsRunning)
+            await StopRumorScannerAsync();
+        else
+            await StartRumorScannerAsync(ensureOcrModel: true);
+    }
+
+    private async Task<bool> StartRumorScannerAsync(bool ensureOcrModel)
+    {
+        if (!_rumorModuleState.TryBeginStart())
+            return false;
+
+        RefreshModuleUi();
+        RumorScanner? scanner = null;
         try
         {
-            if (_rumorScanner is null)
+            if (ensureOcrModel)
             {
                 OcrDataStatus rumorOcr = await OcrDataManager.EnsureRumorAsync(
                     _http,
                     _config.RumorOcrLanguage);
                 if (!rumorOcr.Success)
                     throw new InvalidOperationException(rumorOcr.Message);
-                StartRumorScanner();
             }
-            else
-            {
-                await StopRumorScannerAsync();
-            }
+
+            bool manual = NormalizeRumorScanMode(_config.RumorScanMode) == "manual";
+            string tessdata = Path.Combine(AppContext.BaseDirectory, "tessdata");
+            _rumorCatalog = RumorCatalog.Load(_config.RumorCatalogPath, _config.RumorUserCatalogPath);
+            scanner = new RumorScanner(
+                tessdata,
+                _rumorCatalog,
+                _config,
+                automaticMode: !manual);
+            scanner.StatusChanged += OnRumorScannerStatusChanged;
+            scanner.Start();
+            _rumorScanner = scanner;
+            _rumorModuleState.MarkRunning();
+            _config.RumorScannerEnabled = true;
+            ConfigStore.Save(_config);
+            RumorScannerStatusLabel.Text = manual
+                ? T("Ручной режим активен — используйте кнопку сканирования или хоткей.", "Manual mode active — use the scan button or hotkey.")
+                : T("Режим по наведению активен (экспериментальный).", "Hover mode is active (experimental).");
+            return true;
         }
         catch (Exception exception)
         {
-            RumorScannerStatusLabel.Text = T("Ошибка: ", "Error: ") + exception.Message;
+            if (scanner is not null)
+            {
+                scanner.StatusChanged -= OnRumorScannerStatusChanged;
+                try { scanner.Dispose(); } catch { }
+            }
+            _rumorScanner = null;
+            _rumorModuleState.MarkFaulted(exception);
             _config.RumorScannerEnabled = false;
-            ConfigStore.Save(_config);
+            try { ConfigStore.Save(_config); } catch { }
+            RumorScannerStatusLabel.Text = T("Не удалось запустить: ", "Could not start: ") + exception.Message;
+            return false;
         }
         finally
         {
-            _rumorOperationInProgress = false;
-            SetDataControlsEnabled(true);
             RefreshModuleUi();
         }
     }
 
-    private void StartRumorScanner()
-    {
-        if (_rumorScanner is not null)
-            return;
-        bool manual = NormalizeRumorScanMode(_config.RumorScanMode) == "manual";
-        string tessdata = Path.Combine(AppContext.BaseDirectory, "tessdata");
-        _rumorCatalog = RumorCatalog.Load(_config.RumorCatalogPath, _config.RumorUserCatalogPath);
-        var scanner = new RumorScanner(
-            tessdata,
-            _rumorCatalog,
-            _config,
-            automaticMode: !manual);
-        scanner.StatusChanged += OnRumorScannerStatusChanged;
-        scanner.Start();
-        _rumorScanner = scanner;
-        _config.RumorScannerEnabled = true;
-        ConfigStore.Save(_config);
-        RumorScannerStatusLabel.Text = NormalizeRumorScanMode(_config.RumorScanMode) == "manual"
-            ? T("Ручной режим активен — используйте кнопку сканирования или хоткей.", "Manual mode active — use the scan button or hotkey.")
-            : T("Режим по наведению активен (экспериментальный).", "Hover mode is active (experimental).");
-        RefreshModuleUi();
-    }
-
     private async Task StopRumorScannerAsync()
     {
-        var scanner = _rumorScanner;
-        if (scanner is null)
+        if (!_rumorModuleState.TryBeginStop())
             return;
+
+        RumorScanner? scanner = _rumorScanner;
         _rumorScanner = null;
-        scanner.StatusChanged -= OnRumorScannerStatusChanged;
-        await Task.Run(() =>
-        {
-            scanner.StopAndWait(TimeSpan.FromSeconds(3));
-            scanner.Dispose();
-        });
-        _config.RumorScannerEnabled = false;
-        ConfigStore.Save(_config);
-        RumorScannerStatusLabel.Text = T("Сканер выключен", "Scanner stopped");
         RefreshModuleUi();
+        try
+        {
+            if (scanner is not null)
+            {
+                scanner.StatusChanged -= OnRumorScannerStatusChanged;
+                await Task.Run(() =>
+                {
+                    try { scanner.StopAndWait(TimeSpan.FromSeconds(3)); }
+                    finally { scanner.Dispose(); }
+                });
+            }
+            _rumorModuleState.MarkStopped();
+            _config.RumorScannerEnabled = false;
+            ConfigStore.Save(_config);
+            RumorScannerStatusLabel.Text = T("Сканер выключен", "Scanner stopped");
+        }
+        catch (Exception exception)
+        {
+            _rumorModuleState.MarkFaulted(exception);
+            RumorScannerStatusLabel.Text = T("Ошибка остановки: ", "Stop error: ") + exception.Message;
+        }
+        finally
+        {
+            RefreshModuleUi();
+        }
     }
 
     private void OnRumorScannerStatusChanged(string status) =>
@@ -507,7 +665,7 @@ public partial class MainWindow : MetroWindow
 
     internal void RequestManualRumorScan()
     {
-        if (_rumorScanner is null)
+        if (!_rumorModuleState.Snapshot.IsRunning || _rumorScanner is null)
             return;
         _rumorScanner.RequestManualScan();
         RumorScannerStatusLabel.Text = T("Сканирование запрошено…", "Scan requested…");
@@ -515,7 +673,7 @@ public partial class MainWindow : MetroWindow
 
     internal void RequestPriceScan()
     {
-        if (_engine is null)
+        if (!_priceModuleState.Snapshot.IsRunning || _engine is null)
         {
             StatusLabel.Text = T("Сначала запустите оценщик.", "Start the price scanner first.");
             return;
@@ -528,7 +686,8 @@ public partial class MainWindow : MetroWindow
 
     internal void NotifyGlobalMousePressed(System.Drawing.Point point)
     {
-        if (_rumorScanner is null ||
+        if (!_rumorModuleState.Snapshot.IsRunning ||
+            _rumorScanner is null ||
             RumorOverlayManager.ContainsScreenPoint(point) ||
             RumorLineOverlayManager.ContainsScreenPoint(point))
         {
@@ -552,8 +711,8 @@ public partial class MainWindow : MetroWindow
         bool rumorChanged = previous.AppLanguage != next.AppLanguage ||
                             previous.UiLanguage != next.UiLanguage ||
                             loggingChanged;
-        bool restartPrice = _engine is not null;
-        bool restartRumor = _rumorScanner is not null;
+        bool restartPrice = _priceModuleState.Snapshot.IsRunning;
+        bool restartRumor = _rumorModuleState.Snapshot.IsRunning;
         if ((marketChanged || loggingChanged) && restartPrice) await StopEngineAsync();
         if (rumorChanged && restartRumor) await StopRumorScannerAsync();
 
@@ -569,14 +728,16 @@ public partial class MainWindow : MetroWindow
             _repo?.StartAutoRefresh(_config);
             UpdateStatusLabel();
         }
-        if (restartPrice && _config.IsCalibrated) StartEngine();
-        if (restartRumor) StartRumorScanner();
+        if (restartPrice && _config.IsCalibrated)
+            StartEngine();
+        if (restartRumor)
+            await StartRumorScannerAsync(ensureOcrModel: false);
         RefreshModuleUi();
     }
 
     private async void PriceSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        bool restart = _engine is not null;
+        bool restart = _priceModuleState.Snapshot.IsRunning;
         if (restart) await StopEngineAsync();
         var window = new PriceSettingsWindow(_config) { Owner = this };
         bool saved = window.ShowDialog() == true && window.Result is not null;
@@ -592,7 +753,7 @@ public partial class MainWindow : MetroWindow
 
     private async void RumorSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        bool restart = _rumorScanner is not null;
+        bool restart = _rumorModuleState.Snapshot.IsRunning;
         if (restart) await StopRumorScannerAsync();
         var window = new RumorSettingsWindow(_config) { Owner = this };
         bool saved = window.ShowDialog() == true && window.Result is not null;
@@ -610,7 +771,8 @@ public partial class MainWindow : MetroWindow
                 restart = false;
             }
         }
-        if (restart) StartRumorScanner();
+        if (restart)
+            await StartRumorScannerAsync(ensureOcrModel: false);
         RefreshModuleUi();
     }
 
@@ -619,6 +781,58 @@ public partial class MainWindow : MetroWindow
         string path = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(path);
         OpenExternalPath(path, T("Не удалось открыть папку логов: ", "Could not open the log folder: "));
+    }
+
+    private async void ExportDiagnosticsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_diagnosticsExportInProgress)
+            return;
+
+        string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = T("Сохранить архив диагностики", "Save diagnostics archive"),
+            FileName = $"POE2-LootLens-diagnostics-{timestamp}.zip",
+            DefaultExt = ".zip",
+            Filter = T("ZIP-архив (*.zip)|*.zip", "ZIP archive (*.zip)|*.zip"),
+            AddExtension = true,
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        _diagnosticsExportInProgress = true;
+        ExportDiagnosticsButton.IsEnabled = false;
+        try
+        {
+            StatusLabel.Text = T("Формирование архива диагностики…", "Creating diagnostics archive…");
+            var snapshot = new DiagnosticsSnapshot(
+                GetDisplayVersion().TrimStart('v'),
+                ConfigCopy.Clone(_config),
+                _priceModuleState.Snapshot,
+                _rumorModuleState.Snapshot,
+                _repo?.ItemCount ?? 0,
+                _repo?.ExaltedPerDivine ?? 0m,
+                _repo?.LastFetchedAt,
+                _repo?.LastError);
+            await DiagnosticsExporter.ExportAsync(dialog.FileName, snapshot);
+            StatusLabel.Text = T(
+                "Архив диагностики создан: ",
+                "Diagnostics archive created: ") + Path.GetFileName(dialog.FileName);
+
+            string? folder = Path.GetDirectoryName(dialog.FileName);
+            if (!string.IsNullOrWhiteSpace(folder))
+                OpenExternalPath(folder, T("Не удалось открыть папку диагностики: ", "Could not open the diagnostics folder: "));
+        }
+        catch (Exception exception)
+        {
+            StatusLabel.Text = T("Не удалось создать диагностику: ", "Could not create diagnostics: ") + exception.Message;
+        }
+        finally
+        {
+            _diagnosticsExportInProgress = false;
+            ExportDiagnosticsButton.IsEnabled = true;
+        }
     }
 
     private void TelegramButton_Click(object sender, RoutedEventArgs e) =>
@@ -667,6 +881,10 @@ public partial class MainWindow : MetroWindow
         RumorModeCaptionText.Text = en ? "Mode" : "Режим";
         RumorSettingsButton.ToolTip = en ? "Rumor scanner settings" : "Настройки сканера слухов";
         ManualRumorScanButton.Content = en ? "Scan now" : "Сканировать сейчас";
+        ExportDiagnosticsButton.Content = en ? "Diagnostics ZIP" : "Диагностика ZIP";
+        ExportDiagnosticsButton.ToolTip = en
+            ? "Create a diagnostics archive to send with a bug report"
+            : "Создать архив диагностики для отправки вместе с сообщением об ошибке";
         OpenLogsButton.Content = en ? "Open logs" : "Открыть логи";
         TelegramButton.Content = en ? "Feedback" : "Обратная связь";
         SupportButton.Content = en ? "Support" : "Поддержать";
@@ -707,6 +925,7 @@ public partial class MainWindow : MetroWindow
     {
         EnsureTrayIcon();
         _trayIcon!.Visible = true;
+        ShowInTaskbar = false;
         Hide();
         if (!showNotification || _trayBalloonShown)
             return;
@@ -761,25 +980,40 @@ public partial class MainWindow : MetroWindow
         _trayIcon.ContextMenuStrip = menu;
     }
 
-    private void RestoreFromTray()
+    private void RestoreFromTray() => RestoreFromExternalLaunch();
+
+    internal void RestoreFromExternalLaunch()
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => RestoreFromExternalLaunch());
+            return;
+        }
+
+        _restoreRequested = true;
+        ShowInTaskbar = true;
         Show();
-        WindowState = WindowState.Normal;
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
         Activate();
-        if (_trayIcon is not null) _trayIcon.Visible = false;
+        Focus();
+        if (_trayIcon is not null)
+            _trayIcon.Visible = false;
     }
 
     private void ExitFromTray()
     {
-        _allowExit = true;
+        AllowApplicationExit();
         if (_trayIcon is not null)
             _trayIcon.Visible = false;
         Close();
     }
 
+    internal void AllowApplicationExit() => _allowExit = true;
+
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (!_allowExit)
+        if (!_allowExit && _config.CloseToTray)
         {
             e.Cancel = true;
             WindowState = WindowState.Normal;
@@ -787,6 +1021,8 @@ public partial class MainWindow : MetroWindow
             return;
         }
 
+        if (_closing)
+            return;
         _closing = true;
         _refreshCooldownTimer.Stop();
         _trayIcon?.Dispose();
@@ -799,6 +1035,5 @@ public partial class MainWindow : MetroWindow
         _repo?.Dispose();
         _icons?.Dispose();
         _http.Dispose();
-        System.Windows.Application.Current.Shutdown();
     }
 }

@@ -29,6 +29,28 @@ public class FuzzyMatchTests
         Assert.Equal(shouldMatch, score > 0.84);
     }
 
+
+    [Fact]
+    public void BuildLookupCandidates_RepairsObservedArmourPartMisread()
+    {
+        var candidates = ScanEngine.BuildLookupCandidates("дет иослеха");
+
+        Assert.Contains(candidates, candidate =>
+            candidate.Name == "деталь доспеха" &&
+            candidate.Kind == "ocr-family-repair");
+    }
+
+    [Theory]
+    [InlineData("деталь механизма")]
+    [InlineData("часть доспеха")]
+    [InlineData("дет иного предмета")]
+    public void BuildLookupCandidates_DoesNotOverRepairUnrelatedNames(string name)
+    {
+        var candidates = ScanEngine.BuildLookupCandidates(name);
+
+        Assert.DoesNotContain(candidates, candidate => candidate.Name == "деталь доспеха");
+    }
+
     // Uncut gems are pinned by type + level (no fuzzy), so the canonical key must carry both exactly.
     [Theory]
     [InlineData("uncut spirit gem level 19", "uncut spirit gem level 19")]

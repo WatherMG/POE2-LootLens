@@ -91,6 +91,7 @@ internal sealed class RumorScanner : IDisposable
         _scanIntervalMs = _config.RumorScanIntervalMs;
         _overlayTimeoutSeconds = _config.RumorOverlayTimeoutSeconds;
         _overlayHideMode = _config.RumorOverlayHideMode;
+        _pinned = _config.RumorOverlayPinnedByDefault;
         _confirmationFrames = _config.RumorConfirmationFrames;
         _confirmationWindow = TimeSpan.FromMilliseconds(_config.RumorConfirmationWindowMs);
         _automaticMode = automaticMode;
@@ -174,7 +175,7 @@ internal sealed class RumorScanner : IDisposable
         OpenLog();
         LogInformation(
             $"START mode={(_automaticMode ? "auto" : "manual")} interval={_scanIntervalMs}ms " +
-            $"hide={_overlayHideMode} timeout={_overlayTimeoutSeconds}s " +
+            $"hide={_overlayHideMode} timeout={_overlayTimeoutSeconds}s pinnedDefault={_pinned} " +
             $"confirmation={_confirmationFrames}/{_confirmationWindow.TotalMilliseconds:0}ms " +
             $"ocrSetting={_config.RumorOcrLanguage} ocrModels={_ocrLanguages} " +
             $"sort={_sortMode} categories=[{string.Join(",", _categoryOrder)}] " +
@@ -191,7 +192,17 @@ internal sealed class RumorScanner : IDisposable
             {
                 try
                 {
+                    bool gameForeground = GameWindowDetector.IsPathOfExileForeground();
+                    RumorOverlayManager.SetGameForeground(gameForeground);
+                    RumorLineOverlayManager.SetGameForeground(gameForeground);
                     HandleOverlayCommands();
+
+                    if (!gameForeground)
+                    {
+                        ApplyOptionalTimeout();
+                        await Task.Delay(120, cancellationToken);
+                        continue;
+                    }
 
                     if (_manualBurstRemaining > 0 &&
                         DateTime.UtcNow > _manualBurstDeadline)

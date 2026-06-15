@@ -270,6 +270,35 @@ public class PriceRepositoryTests
     }
 
     [Fact]
+    public async Task Fetch_IncludesOptionalLineageSupportGemCategory()
+    {
+        var handler = new CapturingFakeHttpHandler(FakeApiResponse);
+        using var http = new HttpClient(handler);
+        using var directory = new TempDir();
+        using var repository = new PriceRepository(http);
+
+        await repository.InitialFetchAsync(DefaultConfig(directory.Path));
+
+        Assert.Contains(handler.Urls, url => url.Contains("type=LineageSupportGems", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OptionalLineageCategoryFailure_DoesNotDiscardCorePrices()
+    {
+        using var http = new HttpClient(new StatusRoutingHandler(request =>
+            request.RequestUri?.Query.Contains("type=LineageSupportGems", StringComparison.Ordinal) == true
+                ? (HttpStatusCode.NotFound, "missing")
+                : (HttpStatusCode.OK, FakeApiResponse)));
+        using var directory = new TempDir();
+        using var repository = new PriceRepository(http);
+
+        await repository.InitialFetchAsync(DefaultConfig(directory.Path));
+
+        Assert.True(repository.Prices.ContainsKey("chilling flux"));
+        Assert.Null(repository.LastError);
+    }
+
+    [Fact]
     public void ParseLocalizedStaticResponse_CollectsNestedIdAndTextEntries()
     {
         var result = PriceRepository.ParseLocalizedStaticResponse(FakeRussianStaticResponse);
@@ -328,6 +357,23 @@ public class PriceRepositoryTests
             };
 
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class StatusRoutingHandler(
+        Func<HttpRequestMessage, (HttpStatusCode Status, string Content)> responseFactory)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var result = responseFactory(request);
+            return Task.FromResult(new HttpResponseMessage(result.Status)
+            {
+                Content = new StringContent(result.Content),
+                RequestMessage = request,
+            });
         }
     }
 }

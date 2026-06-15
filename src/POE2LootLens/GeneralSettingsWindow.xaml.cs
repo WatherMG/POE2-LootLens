@@ -10,6 +10,7 @@ internal partial class GeneralSettingsWindow : MetroWindow
 {
     private readonly AppConfig _working;
     private readonly string _uiLanguage;
+    private bool _initializingControls = true;
 
     internal AppConfig? Result { get; private set; }
 
@@ -20,6 +21,7 @@ internal partial class GeneralSettingsWindow : MetroWindow
         _uiLanguage = UiLanguage.Resolve(source.UiLanguage);
         Populate();
         ApplyLanguage();
+        _initializingControls = false;
     }
 
     private void Populate()
@@ -33,8 +35,28 @@ internal partial class GeneralSettingsWindow : MetroWindow
         SelectByTag(RumorLanguageCombo, _working.AppLanguage);
         SelectByTag(ThresholdCurrencyCombo, _working.DisplayThresholdCurrency);
         SelectByTag(LogLevelCombo, _working.LogLevel);
+        StartMinimizedCheckBox.IsChecked = _working.StartMinimized;
+        CloseToTrayCheckBox.IsChecked = _working.CloseToTray;
+        AutoStartPriceScannerCheckBox.IsChecked = _working.AutoStartPriceScanner;
+        AutoStartRumorScannerCheckBox.IsChecked = _working.AutoStartRumorScanner;
         ThresholdBox.Text = _working.DivineDisplayThreshold.ToString("0.##", CultureInfo.InvariantCulture);
         RefreshIntervalBox.Text = _working.DataRefreshIntervalMinutes.ToString(CultureInfo.InvariantCulture);
+    }
+
+
+    private void AutoStartPriceScannerCheckBox_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_initializingControls || _working.IsCalibrated)
+            return;
+
+        System.Windows.MessageBox.Show(
+            this,
+            T(
+                "Автозапуск оценщика не сработает, пока не выбрана область захвата. Сначала сохраните настройки, затем выберите область в главном окне.",
+                "The price scanner cannot start automatically until a capture area is selected. Save these settings, then select the area in the main window."),
+            T("Нужна область захвата", "Capture area required"),
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -63,6 +85,10 @@ internal partial class GeneralSettingsWindow : MetroWindow
         _working.DivineDisplayThreshold = PriceDisplayFormatter.NormalizeThreshold(threshold);
         _working.DataRefreshIntervalMinutes = refreshMinutes;
         _working.LogLevel = SelectedTag(LogLevelCombo, "info");
+        _working.StartMinimized = StartMinimizedCheckBox.IsChecked == true;
+        _working.CloseToTray = CloseToTrayCheckBox.IsChecked == true;
+        _working.AutoStartPriceScanner = AutoStartPriceScannerCheckBox.IsChecked == true;
+        _working.AutoStartRumorScanner = AutoStartRumorScannerCheckBox.IsChecked == true;
         Result = ConfigStore.Normalize(_working, migrateLegacyDefaults: false);
         DialogResult = true;
     }
@@ -78,6 +104,10 @@ internal partial class GeneralSettingsWindow : MetroWindow
         _working.DivineDisplayThreshold = defaults.DivineDisplayThreshold;
         _working.DataRefreshIntervalMinutes = defaults.DataRefreshIntervalMinutes;
         _working.LogLevel = defaults.LogLevel;
+        _working.StartMinimized = defaults.StartMinimized;
+        _working.CloseToTray = defaults.CloseToTray;
+        _working.AutoStartPriceScanner = defaults.AutoStartPriceScanner;
+        _working.AutoStartRumorScanner = defaults.AutoStartRumorScanner;
         Populate();
         ValidationText.Text = T("Общие настройки возвращены к значениям по умолчанию. Нажмите «Сохранить».",
             "General settings were reset to defaults. Click Save to apply.");
@@ -97,6 +127,14 @@ internal partial class GeneralSettingsWindow : MetroWindow
         UiLanguageLabel.Text = en ? "Application language" : "Язык приложения";
         GameLanguageLabel.Text = en ? "POE2 client language" : "Язык клиента POE2";
         RumorLanguageLabel.Text = en ? "Rumor description language" : "Язык описаний слухов";
+        StartupSectionText.Text = en ? "Application and module startup" : "Запуск приложения и модулей";
+        StartMinimizedCheckBox.Content = en ? "Start the application minimized to the tray" : "Запускать приложение свернутым в трей";
+        CloseToTrayCheckBox.Content = en ? "Minimize to the tray when the window is closed" : "При закрытии сворачивать приложение в трей";
+        AutoStartPriceScannerCheckBox.Content = en ? "Automatically start the combination price scanner" : "Автоматически запускать оценщик комбинаций";
+        AutoStartRumorScannerCheckBox.Content = en ? "Automatically start the rumor scanner" : "Автоматически запускать сканер слухов";
+        StartupHintText.Text = en
+            ? "Minimize sends the app to the tray. Close exits unless close-to-tray is enabled. The first launch and a repeated shortcut launch always show the main window."
+            : "Кнопка свернуть отправляет приложение в трей. Крестик закрывает приложение, если отдельно не включено сворачивание при закрытии. Первый и повторный запуск через ярлык показывают главное окно.";
         MarketSectionText.Text = en ? "Market and conversion" : "Рынок и конвертация";
         LeagueLabel.Text = en ? "League" : "Лига";
         ThresholdLabel.Text = en ? "Switch to divine display at" : "Переходить к дивайнам при сумме";

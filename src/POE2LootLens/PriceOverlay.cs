@@ -26,6 +26,7 @@ internal sealed record PriceRow(
     string OcrVariant = "",
     bool VariantAgreement = false,
     int BundleCount = 1,
+    bool QuantityTrusted = true,
     int RecognitionAttempts = 0,
     bool RecognitionFailed = false);
 
@@ -473,7 +474,8 @@ internal sealed class PriceOverlayForm : Form
                 continue;
 
             pricedCount++;
-            decimal value = row.DivineValue * Math.Max(1, row.Multiplier);
+            decimal value = row.DivineValue *
+                            (row.QuantityTrusted ? Math.Max(1, row.Multiplier) : 1);
 
             if (value > topValue)
             {
@@ -498,7 +500,8 @@ internal sealed class PriceOverlayForm : Form
                       $"{row.ExaltedValue:0.###} экз./ед.  id={row.PriceSourceId} -> {row.Name}"
                     : $"{row.MatchKind.ToUpperInvariant()}  OCR {row.OcrConfidence:0} {agreement}  " +
                       $"attempt={row.RecognitionAttempts} failed={row.RecognitionFailed} " +
-                      $"bundle={row.BundleCount}  raw: {row.OcrText}";
+                      $"bundle={row.BundleCount} qty={(row.QuantityTrusted ? "trusted" : "uncertain")}  " +
+                      $"raw: {row.OcrText}";
                 using var diagnosticBrush = new SolidBrush(Color.FromArgb(220, Color.LightGray));
                 graphics.DrawString(
                     diagnostic,
@@ -581,7 +584,8 @@ internal sealed class PriceOverlayForm : Form
             multiplier,
             _displayThreshold,
             _thresholdCurrency,
-            _gameLanguage);
+            _gameLanguage,
+            row.QuantityTrusted);
 
         DrawBackdrop(
             graphics,
@@ -595,9 +599,11 @@ internal sealed class PriceOverlayForm : Form
             x,
             iconY);
 
-        var color = highlightTop
-            ? Color.FromArgb(80, 255, 120)
-            : display.UseDivine ? Color.Gold : Color.White;
+        var color = !row.QuantityTrusted
+            ? Color.FromArgb(245, 255, 196, 104)
+            : highlightTop
+                ? Color.FromArgb(80, 255, 120)
+                : display.UseDivine ? Color.Gold : Color.White;
         using var priceBrush = new SolidBrush(color);
         int textY = screenY - _priceFont.Height / 2;
         graphics.DrawString(display.Label, _priceFont, priceBrush, x + IconSize + 2, textY);

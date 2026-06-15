@@ -65,6 +65,8 @@ internal sealed class RumorOverlayForm : Form
     private Rectangle _nextButton;
     private int _visibleItemLimit = MaxVisibleItems;
     private bool _hasPinnedPosition;
+    private bool _gameForeground = true;
+    private bool _explicitlyHidden;
     private int _lastAutoIslandIndex = -1;
     private Rectangle _lastAutoBounds = Rectangle.Empty;
     private Rectangle _lastAutoPanelBounds = Rectangle.Empty;
@@ -119,21 +121,6 @@ internal sealed class RumorOverlayForm : Form
     }
 
     protected override bool ShowWithoutActivation => true;
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        try
-        {
-            // Keep our own overlay out of screen captures. Normal positioning still avoids the
-            // in-game panel; this is a second line of defence for pinned or manually moved windows.
-            SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE);
-        }
-        catch
-        {
-            // Older Windows builds may not support WDA_EXCLUDEFROMCAPTURE.
-        }
-    }
 
     protected override CreateParams CreateParams
     {
@@ -282,6 +269,7 @@ internal sealed class RumorOverlayForm : Form
 
         bool wasPinned = _state.Pinned;
         _state = state;
+        _explicitlyHidden = false;
         var workingArea = state.Pinned && _hasPinnedPosition
             ? Screen.FromRectangle(new Rectangle(Location, Size)).WorkingArea
             : Screen.FromPoint(state.Anchor).WorkingArea;
@@ -312,7 +300,7 @@ internal sealed class RumorOverlayForm : Form
         }
         UpdateRoundedRegion();
 
-        bool shouldShow = state.PanelDetected || state.Items.Count > 0;
+        bool shouldShow = _gameForeground && (state.PanelDetected || state.Items.Count > 0);
         if (shouldShow && !Visible)
             Show();
         else if (!shouldShow && Visible)
@@ -331,6 +319,30 @@ internal sealed class RumorOverlayForm : Form
         }
     }
 
+    public void SetGameForeground(bool active)
+    {
+        if (IsDisposed)
+            return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => SetGameForeground(active)); } catch { }
+            return;
+        }
+        if (_gameForeground == active)
+            return;
+
+        _gameForeground = active;
+        if (!active)
+        {
+            _animationTimer.Stop();
+            Hide();
+            return;
+        }
+
+        if (!_explicitlyHidden)
+            ApplyState(_state);
+    }
+
     public void HideNow()
     {
         if (IsDisposed)
@@ -342,6 +354,7 @@ internal sealed class RumorOverlayForm : Form
         }
 
         _animationTimer.Stop();
+        _explicitlyHidden = true;
         Hide();
     }
 
@@ -395,7 +408,8 @@ internal sealed class RumorOverlayForm : Form
     public void PrepareForCapture(Point cursor)
     {
         // Intentionally no-op. Moving the overlay before every capture caused visible corner
-        // flicker. Windows capture exclusion plus stable placement after recognition is less noisy.
+        // flicker. Stable placement keeps it outside the detected tooltip, and foreground gating
+        // hides it whenever Path of Exile is not the active application.
     }
 
     public void AvoidPanel(Point anchor, Rectangle panelBounds)
@@ -1252,12 +1266,6 @@ internal sealed class RumorOverlayForm : Form
 
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
-    private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(
@@ -1322,6 +1330,13 @@ internal static class RumorOverlayManager
         var form = _form;
         if (form is not null && !form.IsDisposed)
             form.HideNow();
+    }
+
+    public static void SetGameForeground(bool active)
+    {
+        var form = _form;
+        if (form is not null && !form.IsDisposed)
+            form.SetGameForeground(active);
     }
 
     public static void PrepareForCapture(Point cursor)

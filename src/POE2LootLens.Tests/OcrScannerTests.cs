@@ -137,6 +137,20 @@ public class OcrScannerGeometryTests
         Assert.False(OcrScanner.ShouldIgnoreEdgeRow(band, 734, row));
     }
 
+
+    [Fact]
+    public void EdgeRow_LongLowConfidenceReward_IsKept()
+    {
+        var band = new OcrRowBand(676, 734);
+        var row = new OcrRow(
+            "уникальная двуручная булава",
+            "Уникальная двуручная булава",
+            705,
+            Confidence: 24f);
+
+        Assert.False(OcrScanner.ShouldIgnoreEdgeRow(band, 734, row));
+    }
+
     [Fact]
     public void CoherentGeometryShift_IsAcceptedImmediately()
     {
@@ -241,6 +255,61 @@ public class OcrScannerGeometryTests
         Assert.InRange(bands[^1].Bottom, 184, 189);
     }
 
+
+    [Fact]
+    public void DetectRowBands_DoesNotStretchFinalNormalRowIntoExtraCaptureTail()
+    {
+        using var bitmap = new System.Drawing.Bitmap(
+            500,
+            280,
+            System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        graphics.Clear(System.Drawing.Color.FromArgb(225, 210, 170));
+        using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(55, 45, 35), 3);
+        graphics.DrawLine(pen, 150, 10, 490, 10);
+        graphics.DrawLine(pen, 150, 70, 490, 70);
+        graphics.DrawLine(pen, 150, 130, 490, 130);
+        graphics.DrawLine(pen, 150, 190, 490, 190);
+        using var glyphBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(55, 45, 35));
+        for (int index = 0; index < 18; index++)
+            graphics.FillRectangle(glyphBrush, 250 + index * 9, 211 + index % 3, 5, 17);
+
+        IReadOnlyList<OcrRowBand> bands = OcrScanner.DetectRowBands(bitmap);
+
+        Assert.Equal(4, bands.Count);
+        Assert.InRange(bands[^1].Height, 54, 66);
+        Assert.InRange(bands[^1].Bottom, 244, 256);
+    }
+
+    [Fact]
+    public void DetectRowBands_KeepsExpandedFinalRowWithoutBottomSeparator()
+    {
+        using var bitmap = new System.Drawing.Bitmap(
+            500,
+            310,
+            System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        graphics.Clear(System.Drawing.Color.FromArgb(225, 210, 170));
+        using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(55, 45, 35), 3);
+        graphics.DrawLine(pen, 150, 10, 490, 10);
+        graphics.DrawLine(pen, 150, 70, 490, 70);
+        graphics.DrawLine(pen, 150, 130, 490, 130);
+        graphics.DrawLine(pen, 150, 190, 490, 190);
+
+        // Expanded rewards have their useful text in the lower lane. The normal-height prefix of
+        // the row is intentionally blank in the reward text zone, so the detector must keep the
+        // full synthetic band instead of truncating it to the preceding 60 px cadence.
+        using var glyphBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(55, 45, 35));
+        for (int index = 0; index < 18; index++)
+            graphics.FillRectangle(glyphBrush, 250 + index * 9, 276 + index % 3, 5, 17);
+
+        IReadOnlyList<OcrRowBand> bands = OcrScanner.DetectRowBands(bitmap);
+
+        Assert.Equal(4, bands.Count);
+        Assert.InRange(bands[^1].Height, 112, 122);
+        Assert.InRange(bands[^1].Bottom, 304, 309);
+    }
+
     [Fact]
     public void MalformedBundleSuffix_StripsOnlyForExactKnownBase()
     {
@@ -308,6 +377,74 @@ public class OcrScannerGeometryTests
         Assert.Equal("Неизвестная сфера 6)", text);
     }
 
+    [Fact]
+    public void DetectRowBands_TreatsGoldHoverOutlineAsSeparator()
+    {
+        using var bitmap = new System.Drawing.Bitmap(
+            500,
+            200,
+            System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        graphics.Clear(System.Drawing.Color.FromArgb(225, 210, 170));
+        using var darkPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(55, 45, 35), 3);
+        using var hoverPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(180, 145, 90), 3);
+        graphics.DrawLine(darkPen, 150, 10, 490, 10);
+        graphics.DrawLine(hoverPen, 150, 70, 490, 70);
+        graphics.DrawLine(darkPen, 150, 130, 490, 130);
+        graphics.DrawLine(darkPen, 150, 190, 490, 190);
+
+        IReadOnlyList<OcrRowBand> bands = OcrScanner.DetectRowBands(bitmap);
+
+        Assert.Equal(3, bands.Count);
+        Assert.All(bands, band => Assert.InRange(band.Height, 54, 66));
+    }
+
+    [Fact]
+    public void DetectRowBands_MarksOnlyFullyGoldOutlinedRowAsHovered()
+    {
+        using var bitmap = new System.Drawing.Bitmap(
+            500,
+            200,
+            System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        graphics.Clear(System.Drawing.Color.FromArgb(225, 210, 170));
+        using var darkPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(55, 45, 35), 3);
+        using var hoverPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(180, 145, 90), 3);
+        graphics.DrawLine(hoverPen, 150, 10, 490, 10);
+        graphics.DrawLine(hoverPen, 150, 70, 490, 70);
+        graphics.DrawLine(darkPen, 150, 130, 490, 130);
+        graphics.DrawLine(darkPen, 150, 190, 490, 190);
+
+        IReadOnlyList<OcrRowBand> bands = OcrScanner.DetectRowBands(bitmap);
+
+        Assert.Equal(3, bands.Count);
+        Assert.True(bands[0].HoverHighlighted);
+        Assert.False(bands[1].HoverHighlighted);
+        Assert.False(bands[2].HoverHighlighted);
+    }
+
+    [Theory]
+    [InlineData(true, 9, false, 58f, false)]
+    [InlineData(true, 6, true, 95f, true)]
+    [InlineData(true, 3, false, 50f, true)]
+    [InlineData(true, 9, false, 80f, true)]
+    [InlineData(false, 9, false, 58f, true)]
+    public void HoverQuantityVerdict_RejectsOnlyLargeWeakDisagreement(
+        bool highlighted,
+        int bundleCount,
+        bool agreement,
+        float confidence,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            OcrScanner.IsHoverQuantityTrusted(
+                highlighted,
+                bundleCount,
+                agreement,
+                confidence));
+    }
+
 }
 
 public class OcrQuantityRegressionTests
@@ -333,6 +470,16 @@ public class OcrQuantityRegressionTests
         var candidates = ScanEngine.BuildLookupCandidates("умение дождь клинков");
         Assert.Contains(candidates, candidate =>
             candidate.Name == "дождь клинков" && candidate.Kind == "label");
+    }
+
+    [Fact]
+    public void SplitSkillLabel_GeneratesSemanticNameCandidate()
+    {
+        var candidates = ScanEngine.BuildLookupCandidates("умен ие дождь клинков");
+
+        Assert.Contains(candidates, candidate =>
+            candidate.Name == "дождь клинков" && candidate.Kind == "label");
+        Assert.True(ScanEngine.IsKnownUnpricedReward("умен ие дождь клинков"));
     }
 
     [Fact]
@@ -454,6 +601,139 @@ public class OcrQuantityRegressionTests
         // "(6)" are parsed directly and never reach this rule; malformed "6);" may actually be
         // a misread "(1)" and must fail safe to one item.
         Assert.Equal(expected, OcrScanner.IsSafeRecoveredBundleCount(verified));
+    }
+
+    [Fact]
+    public void FastBundleVerdict_CorrectsWeakOneVersusNineConflictWithoutExtraOcr()
+    {
+        var selected = new OcrRow(
+            "древняя руна вражды",
+            "Древняя руна вражды (9)",
+            100,
+            9,
+            55f,
+            "wide-binary",
+            1,
+            9,
+            false);
+        OcrRow result = OcrScanner.ResolveFastBundleCandidate(
+            selected,
+            [
+                selected,
+                new OcrRow(
+                    "древняя руна вражды",
+                    "Древняя руна вражды (1)",
+                    100,
+                    1,
+                    70f,
+                    "wide-gray",
+                    1,
+                    1,
+                    false),
+            ]);
+
+        Assert.Equal(1, result.BundleCount);
+        Assert.Equal(1, result.Multiplier);
+        Assert.EndsWith("+qty-1v9", result.Variant);
+    }
+
+    [Fact]
+    public void FastBundleVerdict_KeepsSupportedNine()
+    {
+        var selected = new OcrRow(
+            "награда",
+            "Награда (9)",
+            100,
+            9,
+            90f,
+            "wide-gray",
+            1,
+            9,
+            false);
+        OcrRow result = OcrScanner.ResolveFastBundleCandidate(
+            selected,
+            [
+                selected,
+                selected with { Variant = "wide-binary", Confidence = 88f },
+                selected with
+                {
+                    RawText = "Награда (1)",
+                    Variant = "right-gray",
+                    Confidence = 95f,
+                    BundleCount = 1,
+                    Multiplier = 1,
+                },
+            ]);
+
+        Assert.Equal(9, result.BundleCount);
+        Assert.Equal(9, result.Multiplier);
+    }
+
+    [Fact]
+    public void FastBundleVerdict_UsesExistingVariantMajority()
+    {
+        var selected = new OcrRow(
+            "деталь доспеха",
+            "Деталь доспеха (6)",
+            100,
+            6,
+            90f,
+            "wide-gray",
+            1,
+            6,
+            false);
+        OcrRow result = OcrScanner.ResolveFastBundleCandidate(
+            selected,
+            [
+                selected,
+                selected with
+                {
+                    RawText = "Деталь доспеха (4)",
+                    Variant = "wide-binary",
+                    BundleCount = 4,
+                    Multiplier = 4,
+                },
+                selected with
+                {
+                    RawText = "Деталь доспеха [4]",
+                    Variant = "right-gray",
+                    BundleCount = 4,
+                    Multiplier = 4,
+                },
+            ]);
+
+        Assert.Equal(4, result.BundleCount);
+        Assert.Equal(4, result.Multiplier);
+        Assert.EndsWith("+qty-vote", result.Variant);
+    }
+
+    [Fact]
+    public void FastBundleVerdict_DoesNotGuessWithoutExplicitCompetingSuffix()
+    {
+        var selected = new OcrRow(
+            "древняя руна вражды",
+            "Древняя руна вражды (9)",
+            100,
+            9,
+            55f,
+            "wide-binary",
+            1,
+            9,
+            false);
+        OcrRow result = OcrScanner.ResolveFastBundleCandidate(
+            selected,
+            [
+                selected,
+                selected with
+                {
+                    RawText = "Древняя руна вражды",
+                    Variant = "wide-gray",
+                    BundleCount = 1,
+                    Multiplier = 1,
+                },
+            ]);
+
+        Assert.Equal(9, result.BundleCount);
     }
 
     [Fact]

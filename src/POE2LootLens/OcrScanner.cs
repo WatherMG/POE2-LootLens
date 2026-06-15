@@ -16,9 +16,14 @@ internal sealed record OcrRow(
     string Variant = "",
     int LeadingMultiplier = 1,
     int BundleCount = 1,
-    bool VariantAgreement = false);
+    bool VariantAgreement = false,
+    bool HoverHighlighted = false,
+    bool QuantityTrusted = true);
 
-internal readonly record struct OcrRowBand(int Top, int Bottom)
+internal readonly record struct OcrRowBand(
+    int Top,
+    int Bottom,
+    bool HoverHighlighted = false)
 {
     public int CenterY => Top + (Bottom - Top) / 2;
     public int Height => Bottom - Top;
@@ -45,6 +50,9 @@ internal sealed class OcrScanner : IDisposable
     private const int UpscaleFactor = 2;
     private const int MinNameLength = 4;
     private const int MinWordLength = 4;
+    private const double HoverSeparatorCoverage = 0.55;
+    private const int RiskyHoverBundleCount = 4;
+    private const float RiskyHoverConfidence = 75f;
 
     private static readonly Regex MultiplierRegex = new(
         @"(?<![\p{L}\p{Nd}])(\d{1,3})\s*[xх×](?![\p{L}\p{Nd}])",
@@ -168,13 +176,18 @@ internal sealed class OcrScanner : IDisposable
                         if (rowBitmap is null)
                             return;
 
-                        TesseractEngine engine = null!;
+                        TesseractEngine? engine;
                         while (!enginePool.TryTake(out engine))
                             Thread.Yield();
+                        if (engine is null)
+                            return;
                         try
                         {
                             OcrRowBand sourceBand = bands[index];
-                            var localBand = new OcrRowBand(0, rowBitmap.Height);
+                            var localBand = new OcrRowBand(
+                                0,
+                                rowBitmap.Height,
+                                sourceBand.HoverHighlighted);
                             scannedRows[index] = ScanRow(
                                 engine,
                                 rowBitmap,
@@ -388,9 +401,14 @@ internal sealed class OcrScanner : IDisposable
             return false;
 
         int letters = row.NormalizedName.Count(char.IsLetter);
-        return string.IsNullOrWhiteSpace(row.NormalizedName) ||
-               row.Confidence < 35f ||
-               letters < MinNameLength;
+        if (string.IsNullOrWhiteSpace(row.NormalizedName) || letters < MinNameLength)
+            return true;
+
+        // A complete long reward name remains useful even when the capture edge lowers Tesseract's
+        // confidence. Short low-confidence fragments are still discarded as border/icon garbage.
+        if (row.Confidence < 20f && letters < 12)
+            return true;
+        return row.Confidence < 35f && letters < 8;
     }
 
     private static bool IsAlignedSubset(
@@ -459,9 +477,11 @@ internal sealed class OcrScanner : IDisposable
             int samplesPerLine = Math.Max(1, (right - left + stepX - 1) / stepX);
 
             var separatorMask = new bool[bitmap.Height];
+            var hoverSeparatorMask = new bool[bitmap.Height];
             for (int y = 0; y < bitmap.Height; y++)
             {
                 int dark = 0;
+                int hoverGold = 0;
                 int rowOffset = y * stride;
                 for (int x = left; x < right; x += stepX)
                 {
@@ -472,9 +492,19 @@ internal sealed class OcrScanner : IDisposable
                     int luminance = (77 * red + 150 * green + 29 * blue) >> 8;
                     if (luminance < 135)
                         dark++;
+                    if (IsHoverGoldPixel(red, green, blue))
+                        hoverGold++;
                 }
 
-                separatorMask[y] = dark >= samplesPerLine * 0.72;
+                // Hovering a reward replaces its dark separator with a long bright-gold outline.
+                // Treat that outline as geometry, otherwise two adjacent rows are merged and the
+                // highlighted row disappears from OCR. This is a color/count check only; it adds no
+                // Tesseract pass and normal parchment text is far too short to satisfy the coverage.
+                hoverSeparatorMask[y] =
+                    hoverGold >= samplesPerLine * HoverSeparatorCoverage;
+                separatorMask[y] =
+                    dark >= samplesPerLine * 0.72 ||
+                    hoverSeparatorMask[y];
             }
 
             var candidates = MergeNearbySeparators(CollapseSeparatorRuns(separatorMask));
@@ -492,16 +522,47 @@ internal sealed class OcrScanner : IDisposable
             // If the user calibrated the region tightly to the visible list, the final visible row
             // may be fully readable while its lower separator is just outside the capture. Add a
             // synthetic bottom boundary for a plausible final row instead of dropping it entirely.
-            int syntheticBottom = bitmap.Height - 1;
-            int trailingGap = syntheticBottom - separators[^1];
+            int captureBottom = bitmap.Height - 1;
+            int trailingGap = captureBottom - separators[^1];
             int typicalHeight = separators.Count >= 2
-    ? separators.Zip(separators.Skip(1), (a, b) => b - a)
-        .OrderBy(value => value)
-        .ElementAt((separators.Count - 1) / 2)
-    : 0;
+                ? separators.Zip(separators.Skip(1), (a, b) => b - a)
+                    .OrderBy(value => value)
+                    .ElementAt((separators.Count - 1) / 2)
+                : 0;
+
+            // Extra capture space below a normal final row must not turn that row into a synthetic
+            // "expanded" row. That shifted OCR into the empty lower tail and produced the recurring
+            // edge garbage seen in logs. Prefer the established row height when that shorter band
+            // already contains reward ink; keep the full tail for genuinely expanded final rows.
+            int syntheticBottom = captureBottom;
+            bool normalTrailingBandHasInk = false;
+            int extraTailTolerance = Math.Max(14, (int)Math.Round(typicalHeight * 0.20));
+            if (typicalHeight is >= 44 and <= 138 &&
+                trailingGap >= typicalHeight + extraTailTolerance)
+            {
+                int normalBottom = Math.Min(captureBottom, separators[^1] + typicalHeight);
+                var normalTrailingBand = new OcrRowBand(separators[^1], normalBottom);
+                normalTrailingBandHasInk =
+                    LooksLikeRewardBand(buffer, stride, bitmap.Width, normalTrailingBand) &&
+                    HasRewardTextInk(buffer, stride, bitmap.Width, normalTrailingBand);
+                if (normalTrailingBandHasInk)
+                {
+                    syntheticBottom = normalBottom;
+                }
+            }
+
+            trailingGap = syntheticBottom - separators[^1];
+            bool plausibleNormalTrailingHeight =
+                typicalHeight <= 0 ||
+                trailingGap <= Math.Max(76, (int)Math.Round(typicalHeight * 1.55));
+            bool plausibleExpandedTrailingHeight =
+                !normalTrailingBandHasInk &&
+                typicalHeight is >= 44 and <= 82 &&
+                trailingGap >= (int)Math.Round(typicalHeight * 1.60) &&
+                trailingGap <= Math.Min(138, (int)Math.Round(typicalHeight * 2.25));
             bool plausibleTrailingHeight =
                 trailingGap is >= 44 and <= 138 &&
-                (typicalHeight <= 0 || trailingGap <= Math.Max(76, (int)Math.Round(typicalHeight * 1.55)));
+                (plausibleNormalTrailingHeight || plausibleExpandedTrailingHeight);
             var trailingBand = new OcrRowBand(separators[^1], syntheticBottom);
             if (plausibleTrailingHeight &&
                 LooksLikeRewardBand(buffer, stride, bitmap.Width, trailingBand) &&
@@ -519,7 +580,10 @@ internal sealed class OcrScanner : IDisposable
                 if (height is < 44 or > 138)
                     continue;
 
-                var band = new OcrRowBand(top, bottom);
+                bool hoverHighlighted =
+                    HasSeparatorNear(hoverSeparatorMask, top, 6) &&
+                    HasSeparatorNear(hoverSeparatorMask, bottom, 6);
+                var band = new OcrRowBand(top, bottom, hoverHighlighted);
                 if (LooksLikeRewardBand(buffer, stride, bitmap.Width, band))
                     bands.Add(band);
             }
@@ -533,6 +597,39 @@ internal sealed class OcrScanner : IDisposable
             bitmap.UnlockBits(data);
         }
     }
+
+    private static bool HasSeparatorNear(
+        IReadOnlyList<bool> mask,
+        int center,
+        int radius)
+    {
+        int start = Math.Max(0, center - radius);
+        int end = Math.Min(mask.Count - 1, center + radius);
+        for (int index = start; index <= end; index++)
+        {
+            if (mask[index])
+                return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsHoverQuantityTrusted(
+        bool hoverHighlighted,
+        int bundleCount,
+        bool variantAgreement,
+        float confidence) =>
+        !hoverHighlighted ||
+        bundleCount < RiskyHoverBundleCount ||
+        variantAgreement ||
+        confidence >= RiskyHoverConfidence;
+
+    private static bool IsHoverGoldPixel(int red, int green, int blue) =>
+        red >= 140 &&
+        green >= 100 &&
+        blue <= 105 &&
+        red - green >= 20 &&
+        green - blue >= 10;
 
     private static List<int> CollapseSeparatorRuns(IReadOnlyList<bool> mask)
     {
@@ -818,18 +915,56 @@ internal sealed class OcrScanner : IDisposable
                     knownNames);
                 selected = SelectBestCandidate(candidates, knownNames);
             }
+            else if (!tallRow && !IsKnown(selected.NormalizedName, knownNames))
+            {
+                // SingleLine occasionally segments a perfectly readable right-aligned row into
+                // damaged fragments (the real "Деталь доспеха" capture was one such case). Retry
+                // only unresolved standard rows with SingleBlock and a larger scale. Exact catalog
+                // awareness still decides the winner, so normal fast-path rows pay no extra cost.
+                AddBlockRecoveryCandidates(
+                    engine,
+                    candidates,
+                    regionBitmap,
+                    band,
+                    top,
+                    bottom,
+                    0.42,
+                    3,
+                    "block-recovery",
+                    knownNames);
+                selected = SelectBestCandidate(candidates, knownNames);
+            }
         }
+
+        OcrRow quantitySelected = ResolveFastBundleCandidate(selected, candidates);
+        if (_debug && quantitySelected.BundleCount != selected.BundleCount)
+        {
+            _log?.Invoke(
+                $"quantity corrected by existing OCR variants: " +
+                $"'{selected.NormalizedName}' {selected.BundleCount}->{quantitySelected.BundleCount} " +
+                $"selected={selected.Variant}/{selected.Confidence:0}");
+        }
+        selected = quantitySelected;
 
         int agreeingCandidates = candidates.Count(candidate =>
             !string.IsNullOrEmpty(selected.NormalizedName) &&
             candidate.NormalizedName == selected.NormalizedName &&
             candidate.LeadingMultiplier == selected.LeadingMultiplier &&
             candidate.BundleCount == selected.BundleCount);
+        bool variantAgreement = agreeingCandidates >= 2;
+        bool hoverHighlighted = band.HoverHighlighted;
+        bool quantityTrusted = IsHoverQuantityTrusted(
+            hoverHighlighted,
+            selected.BundleCount,
+            variantAgreement,
+            selected.Confidence);
 
         selected = selected with
         {
             CenterY = centerY,
-            VariantAgreement = agreeingCandidates >= 2,
+            VariantAgreement = variantAgreement,
+            HoverHighlighted = hoverHighlighted,
+            QuantityTrusted = quantityTrusted,
         };
 
         return selected;
@@ -840,7 +975,8 @@ internal sealed class OcrScanner : IDisposable
         int debugKey = QuantizeDebugY(centerY);
         string signature =
             $"{height}|{row.Variant}|{row.VariantAgreement}|{row.Confidence:0}|" +
-            $"{row.RawText}|{row.NormalizedName}|{row.LeadingMultiplier}|{row.BundleCount}";
+            $"{row.RawText}|{row.NormalizedName}|{row.LeadingMultiplier}|{row.BundleCount}|" +
+            $"{row.HoverHighlighted}|{row.QuantityTrusted}";
         var now = DateTime.UtcNow;
         bool unchanged = _lastRowDebugSignature.TryGetValue(debugKey, out string? previous) &&
                          string.Equals(previous, signature, StringComparison.Ordinal);
@@ -858,7 +994,8 @@ internal sealed class OcrScanner : IDisposable
             $"row y={centerY} h={height} variant={row.Variant} " +
             $"agree={row.VariantAgreement} conf={row.Confidence:0} " +
             $"raw='{row.RawText}' norm='{row.NormalizedName}' " +
-            $"lead={row.LeadingMultiplier} bundle={row.BundleCount} x{row.Multiplier}{repeat}");
+            $"lead={row.LeadingMultiplier} bundle={row.BundleCount} x{row.Multiplier} " +
+            $"hover={row.HoverHighlighted} qty={(row.QuantityTrusted ? "trusted" : "uncertain")}{repeat}");
         _lastRowDebugSignature[debugKey] = signature;
         _lastRowDebugAt[debugKey] = now;
         _suppressedRowDebug[debugKey] = 0;
@@ -919,6 +1056,46 @@ internal sealed class OcrScanner : IDisposable
         }
     }
 
+    private void AddBlockRecoveryCandidates(
+        TesseractEngine engine,
+        List<OcrRow> candidates,
+        Bitmap regionBitmap,
+        OcrRowBand band,
+        int top,
+        int bottom,
+        double leftFraction,
+        int upscaleFactor,
+        string variantPrefix,
+        IReadOnlySet<string>? knownNames)
+    {
+        int left = Math.Max(1, (int)Math.Round(regionBitmap.Width * leftFraction));
+        int rightTrim = (int)(regionBitmap.Width * RightTrimFraction);
+        int width = Math.Max(1, regionBitmap.Width - left - rightTrim);
+
+        using var row = CropBitmap(regionBitmap, left, top, width, bottom - top);
+        using var textRow = CropToInkBounds(row);
+        candidates.Add(RunSingleLine(
+            engine,
+            textRow,
+            binary: false,
+            GetDisplayCenterY(band),
+            $"{variantPrefix}-gray",
+            knownNames,
+            upscaleFactor,
+            quantitySource: row,
+            segmentationMode: PageSegMode.SingleBlock));
+        candidates.Add(RunSingleLine(
+            engine,
+            textRow,
+            binary: true,
+            GetDisplayCenterY(band),
+            $"{variantPrefix}-binary",
+            knownNames,
+            upscaleFactor,
+            quantitySource: row,
+            segmentationMode: PageSegMode.SingleBlock));
+    }
+
     private static OcrRow SelectBestCandidate(
         IReadOnlyList<OcrRow> candidates,
         IReadOnlySet<string>? knownNames)
@@ -944,6 +1121,93 @@ internal sealed class OcrScanner : IDisposable
         }
 
         return best;
+    }
+
+    internal static OcrRow ResolveFastBundleCandidate(
+        OcrRow selected,
+        IReadOnlyList<OcrRow> candidates)
+    {
+        if (selected.BundleCount <= 1 || string.IsNullOrEmpty(selected.NormalizedName))
+            return selected;
+
+        var explicitCandidates = candidates
+            .Where(candidate =>
+                candidate.NormalizedName == selected.NormalizedName &&
+                candidate.LeadingMultiplier == selected.LeadingMultiplier &&
+                TryGetExplicitBundleCount(candidate.RawText, out _))
+            .Select(candidate => new
+            {
+                Row = candidate,
+                Count = ExtractTrailingBundleCount(candidate.RawText.Trim(), out _),
+            })
+            .Where(candidate => candidate.Count is >= 1 and <= 999)
+            .ToArray();
+
+        if (explicitCandidates.Length == 0)
+            return selected;
+
+        var grouped = explicitCandidates
+            .GroupBy(candidate => candidate.Count)
+            .Select(group => new
+            {
+                Count = group.Key,
+                Votes = group.Count(),
+                BestConfidence = group.Max(candidate => candidate.Row.Confidence),
+            })
+            .OrderByDescending(group => group.Votes)
+            .ThenByDescending(group => group.BestConfidence)
+            .ThenBy(group => group.Count)
+            .ToArray();
+
+        if (grouped.Length > 0 &&
+            grouped[0].Votes >= 2 &&
+            (grouped.Length == 1 || grouped[0].Votes > grouped[1].Votes))
+        {
+            int count = grouped[0].Count;
+            return selected with
+            {
+                BundleCount = count,
+                Multiplier = MultiplyAndClamp(selected.LeadingMultiplier, count),
+                Variant = count == selected.BundleCount
+                    ? selected.Variant
+                    : $"{selected.Variant}+qty-vote",
+            };
+        }
+
+        // The observed catastrophic case is an intact-looking "(9)" produced from a real "(1)".
+        // Do not run another OCR ensemble here: rune rows already have gray and binary candidates.
+        // When those existing candidates explicitly disagree 1 vs 9, prefer 1 only if the selected
+        // nine is weak or the unit candidate is comparably confident. This is constant-time and does
+        // not delay the panel or block the overlay.
+        if (selected.BundleCount == 9)
+        {
+            var unitCandidate = explicitCandidates
+                .Where(candidate => candidate.Count == 1)
+                .OrderByDescending(candidate => candidate.Row.Confidence)
+                .FirstOrDefault();
+            int selectedVotes = explicitCandidates.Count(candidate => candidate.Count == 9);
+            if (unitCandidate is not null &&
+                selectedVotes == 1 &&
+                (selected.Confidence < 75f ||
+                 unitCandidate.Row.Confidence >= selected.Confidence - 10f))
+            {
+                return selected with
+                {
+                    BundleCount = 1,
+                    Multiplier = Math.Max(1, selected.LeadingMultiplier),
+                    Variant = $"{selected.Variant}+qty-1v9",
+                };
+            }
+        }
+
+        return selected;
+    }
+
+    internal static bool TryGetExplicitBundleCount(string rawText, out int count)
+    {
+        string trimmed = rawText.Trim();
+        count = ExtractTrailingBundleCount(trimmed, out string withoutBundle);
+        return !string.Equals(trimmed, withoutBundle, StringComparison.Ordinal);
     }
 
     private static OcrRow SelectCandidate(
@@ -993,7 +1257,8 @@ internal sealed class OcrScanner : IDisposable
         string variant,
         IReadOnlySet<string>? knownNames,
         int upscaleFactor,
-        Bitmap? quantitySource = null)
+        Bitmap? quantitySource = null,
+        PageSegMode segmentationMode = PageSegMode.SingleLine)
     {
         using var prepared = PrepareForOcr(source, binary);
         using var upscaled = Upscale(prepared, upscaleFactor);
@@ -1001,7 +1266,7 @@ internal sealed class OcrScanner : IDisposable
 
         (string? Text, float Confidence) candidate;
         using (var pix = Pix.LoadFromMemory(png))
-        using (var page = engine.Process(pix, PageSegMode.SingleLine))
+        using (var page = engine.Process(pix, segmentationMode))
             candidate = ExtractBestLine(page);
 
         if (candidate.Text is null)

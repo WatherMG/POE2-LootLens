@@ -31,6 +31,7 @@ internal partial class RumorSettingsWindow : MetroWindow
         SelectByTag(OcrLanguageCombo, _working.RumorOcrLanguage);
         SelectByTag(HideModeCombo, _working.RumorOverlayHideMode);
         SelectByTag(SortModeCombo, _working.RumorSortMode);
+        PinnedByDefaultCheckBox.IsChecked = _working.RumorOverlayPinnedByDefault;
         TimeoutBox.Text = _working.RumorOverlayTimeoutSeconds.ToString();
         RebuildCategoryOrder(_working.RumorCategoryOrder);
         CategoryOrderList.ItemsSource = _categoryOrder;
@@ -242,6 +243,7 @@ internal partial class RumorSettingsWindow : MetroWindow
         _working.RumorOcrLanguage = SelectedTag(OcrLanguageCombo, "en");
         _working.RumorOverlayHideMode = SelectedTag(HideModeCombo, "never");
         _working.RumorOverlayTimeoutSeconds = timeout;
+        _working.RumorOverlayPinnedByDefault = PinnedByDefaultCheckBox.IsChecked == true;
         _working.RumorSortMode = SelectedTag(SortModeCombo, "kindThenTier");
         _working.RumorCategoryOrder = _categoryOrder.Select(item => item.Id).ToList();
         Result = ConfigStore.Normalize(_working, migrateLegacyDefaults: false);
@@ -259,12 +261,14 @@ internal partial class RumorSettingsWindow : MetroWindow
         _working.RumorOverlayHideMode = defaults.RumorOverlayHideMode;
         _working.RumorOverlayHideDelayMs = defaults.RumorOverlayHideDelayMs;
         _working.RumorOverlayTimeoutSeconds = defaults.RumorOverlayTimeoutSeconds;
+        _working.RumorOverlayPinnedByDefault = defaults.RumorOverlayPinnedByDefault;
         _working.RumorSortMode = defaults.RumorSortMode;
         _working.RumorCategoryOrder = [.. defaults.RumorCategoryOrder];
         SelectByTag(ModeCombo, _working.RumorScanMode);
         SelectByTag(OcrLanguageCombo, _working.RumorOcrLanguage);
         SelectByTag(HideModeCombo, _working.RumorOverlayHideMode);
         SelectByTag(SortModeCombo, _working.RumorSortMode);
+        PinnedByDefaultCheckBox.IsChecked = _working.RumorOverlayPinnedByDefault;
         TimeoutBox.Text = _working.RumorOverlayTimeoutSeconds.ToString();
         RebuildCategoryOrder(_working.RumorCategoryOrder);
         RefreshHotkeyLabel();
@@ -343,6 +347,12 @@ internal partial class RumorSettingsWindow : MetroWindow
             };
         }
         OverlaySectionText.Text = en ? "Overlay behavior" : "Поведение оверлея";
+        PinnedByDefaultCheckBox.Content = en
+            ? "Show the overlay pinned by default"
+            : "Показывать оверлей закреплённым по умолчанию";
+        PinnedByDefaultHintText.Text = en
+            ? "An unpinned overlay follows the active island and hides after a click outside it. A pinned overlay keeps its position until closed manually."
+            : "Откреплённый оверлей следует за активным островом и скрывается при клике вне него. Закреплённый сохраняет позицию до ручного закрытия.";
         HideModeLabel.Text = en ? "Auto-hide" : "Автоскрытие";
         TimeoutLabel.Text = en ? "Timeout, seconds (1–3600)" : "Таймаут, секунд (1–3600)";
         SortSectionText.Text = en ? "Card sorting" : "Сортировка карточек";

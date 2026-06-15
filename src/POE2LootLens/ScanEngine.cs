@@ -271,8 +271,14 @@ internal sealed class ScanEngine : IDisposable
                     Bitmap bitmap = capture.Capture();
                     ListPanelSample panelSample = detector.Analyze(bitmap);
                     int brightness = panelSample.AverageBrightness;
-                    bool brightFrame = panelSample.IsOpen;
-                    bool darkFrame = !panelSample.IsOpen;
+                    bool rumorPanelFrame = panelSample.IsOpen && RumorScanner.LooksLikeRumorPanelImage(bitmap);
+                    bool brightFrame = panelSample.IsOpen && !rumorPanelFrame;
+                    bool darkFrame = !brightFrame;
+                    if (rumorPanelFrame)
+                    {
+                        candidateDetected = false;
+                        Trace("price scan ignored Atlas rumor panel geometry");
+                    }
 
                     if (_dismissed)
                     {
@@ -422,15 +428,24 @@ internal sealed class ScanEngine : IDisposable
                                             .ToArray();
                                         RemoveEmptyUnconfirmedSlots(slots, emptyCenters);
                                         int trustedReadCount = reads.Count(row =>
-                                            row.HasPrice || row.MatchKind == "known-no-price");
-                                        bool hasPricedRead = reads.Any(row => row.HasPrice);
+                                            (row.HasPrice && row.QuantityTrusted) ||
+                                            row.MatchKind == "known-no-price");
+                                        bool hasPricedRead = reads.Any(row =>
+                                            row.HasPrice && row.QuantityTrusted);
+                                        bool hasQuantityUncertainRead = reads.Any(row =>
+                                            row.HasPrice && !row.QuantityTrusted);
+                                        bool hasKnownUnpricedRead = reads.Any(row =>
+                                            row.MatchKind == "known-no-price");
                                         bool strongRowStructure =
                                             ocrRows.Count >= 2 && trustedReadCount >= 2;
-                                        // Do not surface arbitrary Atlas labels/tooltips merely because
-                                        // they happen to form text bands. Before confirmation, require either a
-                                        // priced catalog match or at least two independently known reward rows.
-                                        // One generic known-no-price word is too weak and must not show a spinner.
-                                        bool hasPlausibleRows = hasPricedRead || strongRowStructure;
+                                        // A single catalog price or known generic reward is a candidate, not final
+                                        // proof. Strong multi-row structure confirms immediately; a single row must
+                                        // repeat on a second OCR frame through HasSufficientPanelEvidence below.
+                                        bool hasPlausibleRows =
+                                            hasPricedRead ||
+                                            hasKnownUnpricedRead ||
+                                            hasQuantityUncertainRead ||
+                                            strongRowStructure;
                                         // The reading indicator describes the latest completed OCR pass, not
                                         // historical suspicion. If the current pass is OCR_EMPTY/unrelated, clear
                                         // it immediately instead of leaving a spinner over an empty crop.
@@ -448,41 +463,52 @@ internal sealed class ScanEngine : IDisposable
                                             lastRows = MergeReads(slots, reads, partialScan);
                                         }
 
-                                        string pricedIdentity = string.Join(
+                                        string trustedIdentity = string.Join(
                                             "|",
-                                            reads.Where(row => row.HasPrice)
+                                            reads.Where(row =>
+                                                    row.HasPrice ||
+                                                    row.MatchKind == "known-no-price")
                                                 .OrderBy(row => row.CenterY)
-                                                .Select(row => $"{row.PriceSourceId}:{row.Multiplier}:{QuantizeDebugY(row.CenterY)}"));
-                                        if (pricedIdentity.Length == 0)
+                                                .Select(row => row.HasPrice
+                                                    ? row.QuantityTrusted
+                                                        ? $"price:{row.PriceSourceId}:{row.Multiplier}:{QuantizeDebugY(row.CenterY)}"
+                                                        : $"quantity:{row.PriceSourceId}:{QuantizeDebugY(row.CenterY)}"
+                                                    : $"known:{row.Name}:{QuantizeDebugY(row.CenterY)}"));
+                                        if (trustedIdentity.Length == 0)
                                         {
                                             panelCandidateIdentity = null;
                                             panelCandidateFrames = 0;
                                         }
                                         else if (string.Equals(
                                                      panelCandidateIdentity,
-                                                     pricedIdentity,
+                                                     trustedIdentity,
                                                      StringComparison.Ordinal))
                                         {
                                             panelCandidateFrames++;
                                         }
                                         else
                                         {
-                                            panelCandidateIdentity = pricedIdentity;
+                                            panelCandidateIdentity = trustedIdentity;
                                             panelCandidateFrames = 1;
                                         }
 
-                                        bool hasLockedPricedRow = lastRows.Any(row => row.HasPrice);
+                                        bool hasLockedTrustedRow = lastRows.Any(row =>
+                                            (row.HasPrice && row.QuantityTrusted) ||
+                                            row.MatchKind == "known-no-price");
+                                        bool hasDisplayableQuantityUncertainRow = lastRows.Any(row =>
+                                            row.HasPrice && !row.QuantityTrusted);
                                         bool panelEvidenceConfirmed = HasSufficientPanelEvidence(
-                                            hasLockedPricedRow,
+                                            hasLockedTrustedRow,
                                             strongRowStructure,
-                                            panelCandidateFrames);
-                                        if (!confirmedOpen && hasLockedPricedRow && panelEvidenceConfirmed)
+                                            panelCandidateFrames) ||
+                                            (hasDisplayableQuantityUncertainRow && panelCandidateFrames >= 2);
+                                        if (!confirmedOpen && panelEvidenceConfirmed)
                                         {
                                             confirmedOpen = true;
                                             suppressHintUntilConfirm = false;
                                             Log(
                                                 "panel CONFIRMED " +
-                                                $"(locked price; rows={ocrRows.Count}, trusted={trustedReadCount}, frames={panelCandidateFrames})");
+                                                $"(trusted rewards; rows={ocrRows.Count}, trusted={trustedReadCount}, frames={panelCandidateFrames})");
                                         }
                                     }
                                 }
@@ -567,7 +593,8 @@ internal sealed class ScanEngine : IDisposable
         long elapsedMilliseconds)
     {
         string signature = string.Join("|", reads.Select(row =>
-            $"{QuantizeDebugY(row.CenterY)}:{row.Name}:{row.MatchKind}:{row.Multiplier}:{row.BundleCount}:{row.RecognitionFailed}"));
+            $"{QuantizeDebugY(row.CenterY)}:{row.Name}:{row.MatchKind}:{row.Multiplier}:" +
+            $"{row.BundleCount}:{row.QuantityTrusted}:{row.RecognitionFailed}"));
         var now = DateTime.UtcNow;
         if (signature == _lastOcrTraceSignature &&
             now - _lastOcrTraceAt < TimeSpan.FromSeconds(8))
@@ -591,8 +618,9 @@ internal sealed class ScanEngine : IDisposable
                 (row.HasPrice
                     ? $"HIT->'{row.Name}' {row.MatchKind} " +
                       $"score={row.MatchScore:0.000} ocr={row.OcrConfidence:0} " +
-                      $"agree={row.VariantAgreement} unitEx={row.ExaltedValue:0.###} " +
-                      $"id={row.PriceSourceId}"
+                      $"agree={row.VariantAgreement} " +
+                      $"qty={(row.QuantityTrusted ? "trusted" : "uncertain")} " +
+                      $"unitEx={row.ExaltedValue:0.###} id={row.PriceSourceId}"
                     : $"{row.MatchKind.ToUpperInvariant()} " +
                       $"ocr={row.OcrConfidence:0} bundle={row.BundleCount}"))));
     }
@@ -730,7 +758,9 @@ internal sealed class ScanEngine : IDisposable
             matchKind is "exact" or "label" or "suffix" &&
             (string.Equals(matchedKey, row.NormalizedName, StringComparison.Ordinal) ||
              matchKind is "label" or "suffix");
-        int multiplier = ResolveEffectiveMultiplier(row, exactIdentity);
+        int multiplier = row.QuantityTrusted
+            ? ResolveEffectiveMultiplier(row, exactIdentity)
+            : Math.Max(1, row.LeadingMultiplier);
 
         return new PriceRow(
             stableY,
@@ -748,7 +778,8 @@ internal sealed class ScanEngine : IDisposable
             entry.SourceId,
             row.Variant,
             row.VariantAgreement,
-            row.BundleCount);
+            row.BundleCount,
+            row.QuantityTrusted);
     }
 
     private static PriceRow CreateUnpricedRow(
@@ -773,7 +804,8 @@ internal sealed class ScanEngine : IDisposable
             string.Empty,
             row.Variant,
             row.VariantAgreement,
-            row.BundleCount);
+            row.BundleCount,
+            true);
 
     internal static int ResolveEffectiveMultiplier(OcrRow row, bool exactIdentity)
     {
@@ -988,11 +1020,12 @@ internal sealed class ScanEngine : IDisposable
         // repaired without globally mutating OCR text.
         foreach (var candidate in candidates.ToArray())
         {
-            foreach (string prefix in new[] { "умение ", "поддержка ", "skill ", "support " })
-            {
-                if (candidate.Name.StartsWith(prefix, StringComparison.Ordinal))
-                    Add(candidate.Name[prefix.Length..], "label");
-            }
+            Match label = Regex.Match(
+                candidate.Name,
+                @"^(?:умен\s*ие|поддерж\s*ка|skill|support)\s+",
+                RegexOptions.CultureInvariant);
+            if (label.Success)
+                Add(candidate.Name[label.Length..], "label");
         }
 
         foreach (var candidate in candidates.ToArray())
@@ -1051,6 +1084,27 @@ internal sealed class ScanEngine : IDisposable
                 Add("гнев альдура", "ocr-repair");
         }
 
+        // Observed Russian OCR can lose several narrow strokes in "Деталь доспеха" and return
+        // stable garbage such as "дет иослеха". Recover only when both the distinctive beginning
+        // and the damaged armour-word stem are present; this is far narrower than lowering the global
+        // fuzzy threshold and therefore cannot turn arbitrary low-confidence rows into priced items.
+        foreach (var candidate in candidates.ToArray())
+        {
+            string compact = candidate.Name.Replace(" ", string.Empty, StringComparison.Ordinal);
+            bool looksLikeArmourPart =
+                compact.StartsWith("дет", StringComparison.Ordinal) &&
+                (compact.Contains("оспех", StringComparison.Ordinal) ||
+                 compact.Contains("ослех", StringComparison.Ordinal) ||
+                 compact.Contains("иослех", StringComparison.Ordinal));
+            if (!looksLikeArmourPart)
+                continue;
+
+            string kind = candidate.Kind == "raw"
+                ? "ocr-family-repair"
+                : $"{candidate.Kind}-ocr-family-repair";
+            Add("деталь доспеха", kind);
+        }
+
         foreach (var candidate in candidates.ToArray())
         {
             int lastSpace = candidate.Name.LastIndexOf(' ');
@@ -1076,10 +1130,10 @@ internal sealed class ScanEngine : IDisposable
             return false;
 
         string normalized = name.Trim();
-        if (normalized.StartsWith("умение ", StringComparison.Ordinal) ||
-            normalized.StartsWith("поддержка ", StringComparison.Ordinal) ||
-            normalized.StartsWith("skill ", StringComparison.Ordinal) ||
-            normalized.StartsWith("support ", StringComparison.Ordinal))
+        if (Regex.IsMatch(
+                normalized,
+                @"^(?:умен\s*ие|поддерж\s*ка|skill|support)\s+",
+                RegexOptions.CultureInvariant))
         {
             return true;
         }
@@ -1519,6 +1573,20 @@ internal sealed class ScanEngine : IDisposable
                 continue;
             }
 
+            if (read.HasPrice && !read.QuantityTrusted)
+            {
+                // The item and unit price are known, but the hovered gold outline made a large
+                // multiplier unreliable. Keep the row visible as "× ?", do not lock it, and keep
+                // rescanning until the cursor leaves or OCR variants agree.
+                slot.PendingIdentity = null;
+                slot.PendingCount = 0;
+                slot.FailureIdentity = null;
+                slot.FailureCount = 0;
+                slot.RecognitionAttempts = 0;
+                slot.RecognitionFailed = false;
+                continue;
+            }
+
             if (read.HasPrice)
             {
                 slot.FailureIdentity = null;
@@ -1586,15 +1654,22 @@ internal sealed class ScanEngine : IDisposable
         {
             display.Add(slot.Locked
                 ? slot.LockedRow
-                : slot.Latest with
-                {
-                    CenterY = slot.Y,
-                    HasPrice = false,
-                    DivineValue = 0m,
-                    ExaltedValue = 0m,
-                    RecognitionAttempts = slot.RecognitionAttempts,
-                    RecognitionFailed = slot.RecognitionFailed,
-                });
+                : slot.Latest.HasPrice && !slot.Latest.QuantityTrusted
+                    ? slot.Latest with
+                    {
+                        CenterY = slot.Y,
+                        RecognitionAttempts = 0,
+                        RecognitionFailed = false,
+                    }
+                    : slot.Latest with
+                    {
+                        CenterY = slot.Y,
+                        HasPrice = false,
+                        DivineValue = 0m,
+                        ExaltedValue = 0m,
+                        RecognitionAttempts = slot.RecognitionAttempts,
+                        RecognitionFailed = slot.RecognitionFailed,
+                    });
         }
 
         return display;
@@ -1605,10 +1680,10 @@ internal sealed class ScanEngine : IDisposable
 
 
     internal static bool HasSufficientPanelEvidence(
-        bool hasLockedPricedRow,
+        bool hasLockedTrustedRow,
         bool strongRowStructure,
         int repeatedCandidateFrames) =>
-        hasLockedPricedRow && (strongRowStructure || repeatedCandidateFrames >= 2);
+        hasLockedTrustedRow && (strongRowStructure || repeatedCandidateFrames >= 2);
 
     internal static int RequiredConfirmations(PriceRow row)
     {

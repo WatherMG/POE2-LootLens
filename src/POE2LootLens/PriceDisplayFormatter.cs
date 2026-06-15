@@ -19,28 +19,32 @@ internal static class PriceDisplayFormatter
         int multiplier,
         decimal divineThreshold = 1m,
         string? thresholdCurrency = DivineThresholdCurrency,
-        string? gameLanguage = "ru")
+        string? gameLanguage = "ru",
+        bool quantityTrusted = true)
     {
         multiplier = Math.Max(1, multiplier);
         decimal displayThreshold = NormalizeThreshold(divineThreshold);
         thresholdCurrency = NormalizeThresholdCurrency(thresholdCurrency);
 
-        decimal totalDivine = unitDivine * multiplier;
-        decimal totalExalted = unitExalted * multiplier;
+        decimal effectiveMultiplier = quantityTrusted ? multiplier : 1m;
+        decimal totalDivine = unitDivine * effectiveMultiplier;
+        decimal totalExalted = unitExalted * effectiveMultiplier;
         decimal comparisonValue = thresholdCurrency == ExaltedThresholdCurrency
             ? totalExalted
             : totalDivine;
 
         bool useDivine = comparisonValue >= displayThreshold && unitDivine > 0m;
         decimal unit = useDivine ? unitDivine : unitExalted;
-        decimal total = unit * multiplier;
+        decimal total = unit * effectiveMultiplier;
         string format = useDivine ? "0.##" : "0.#";
         string quantitySuffix = IsRussian(gameLanguage) ? "шт." : "pcs.";
 
-        string label = multiplier > 1
-            ? $"{total.ToString(format, CultureInfo.InvariantCulture)} " +
-              $"({unit.ToString(format, CultureInfo.InvariantCulture)} × {multiplier} {quantitySuffix})"
-            : total.ToString(format, CultureInfo.InvariantCulture);
+        string label = !quantityTrusted
+            ? $"{unit.ToString(format, CultureInfo.InvariantCulture)} (× ? {quantitySuffix})"
+            : multiplier > 1
+                ? $"{total.ToString(format, CultureInfo.InvariantCulture)} " +
+                  $"({unit.ToString(format, CultureInfo.InvariantCulture)} × {multiplier} {quantitySuffix})"
+                : total.ToString(format, CultureInfo.InvariantCulture);
 
         return new PriceDisplay(useDivine, unit, total, label);
     }

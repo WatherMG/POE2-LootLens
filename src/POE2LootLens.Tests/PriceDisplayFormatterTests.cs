@@ -84,6 +84,20 @@ public class PriceDisplayFormatterTests
 
 
     [Fact]
+    public void UncertainQuantity_ShowsUnitPriceWithoutApplyingMultiplier()
+    {
+        var display = PriceDisplayFormatter.Format(
+            0.117m,
+            15.3m,
+            9,
+            quantityTrusted: false);
+
+        Assert.False(display.UseDivine);
+        Assert.Equal(15.3m, display.TotalValue);
+        Assert.Equal("15.3 (× ? шт.)", display.Label);
+    }
+
+    [Fact]
     public void EnglishBundle_UsesPcsSuffix()
     {
         var display = PriceDisplayFormatter.Format(

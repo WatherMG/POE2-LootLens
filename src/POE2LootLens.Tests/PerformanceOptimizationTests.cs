@@ -117,14 +117,14 @@ public class RecognitionSafetyTests
     [InlineData(true, false, 1, false)]
     [InlineData(false, true, 3, false)]
     public void PricePanelConfirmation_RequiresStructureOrRepeatedSingleRow(
-        bool hasLockedPrice,
+        bool hasLockedTrustedRow,
         bool strongStructure,
         int repeatedFrames,
         bool expected)
     {
         Assert.Equal(
             expected,
-            ScanEngine.HasSufficientPanelEvidence(hasLockedPrice, strongStructure, repeatedFrames));
+            ScanEngine.HasSufficientPanelEvidence(hasLockedTrustedRow, strongStructure, repeatedFrames));
     }
 
     [Fact]
